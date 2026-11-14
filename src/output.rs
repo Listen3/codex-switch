@@ -87,6 +87,8 @@ pub enum JsonUsage {
         reset_credits_error: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         additional_limits: Vec<JsonAdditionalLimit>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        subscription_expires_at: Option<String>,
     },
     Err {
         error: String,
@@ -255,6 +257,7 @@ pub fn usage_to_json(result: Result<&UsageInfo, &str>) -> JsonUsage {
                     .iter()
                     .map(additional_limit_to_json)
                     .collect(),
+                subscription_expires_at: u.subscription_expires_at.map(format_iso8601),
             }
         }
     }
@@ -292,7 +295,14 @@ pub fn format_reset_time(ts: i64) -> String {
     format!("{relative} ({local_fmt})")
 }
 
-/// Short reset time for table columns: "14:30" or "03-27 14:30"
+/// Subscription period end for the account table: calendar date, not a quota reset.
+pub fn format_subscription_date(ts: i64) -> String {
+    let dt: DateTime<Local> = match Local.timestamp_opt(ts, 0).single() {
+        Some(value) => value,
+        None => return "--".into(),
+    };
+    dt.format("%Y-%m-%d").to_string()
+}
 pub fn format_reset_short(ts: i64) -> String {
     let now = Local::now();
     let dt: DateTime<Local> = match Local.timestamp_opt(ts, 0).single() {

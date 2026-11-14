@@ -1,11 +1,13 @@
 pub mod app;
 pub mod hitmap;
 pub mod keymap;
+pub mod locale;
 pub mod menu;
 pub mod popup;
 pub mod provider_form;
 pub mod provider_launch;
 pub mod settings;
+pub mod sync_page;
 pub mod theme;
 pub mod ui;
 

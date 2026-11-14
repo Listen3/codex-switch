@@ -53,6 +53,8 @@ struct CacheEntry {
     individual_limit: Option<Box<crate::usage::SpendControlLimit>>,
     #[serde(default)]
     additional_limits: Vec<crate::usage::AdditionalRateLimit>,
+    #[serde(default)]
+    subscription_expires_at: Option<i64>,
 }
 
 /// A refusal the auth server will repeat for as long as the profile keeps the
@@ -212,6 +214,7 @@ fn to_entry(u: &UsageInfo) -> CacheEntry {
         rate_limit_reached_type: u.rate_limit_reached_type.clone(),
         individual_limit: u.individual_limit.clone(),
         additional_limits: u.additional_limits.clone(),
+        subscription_expires_at: u.subscription_expires_at,
     }
 }
 
@@ -270,6 +273,7 @@ fn from_entry(e: &CacheEntry) -> UsageInfo {
         rate_limit_reached_type: e.rate_limit_reached_type.clone(),
         individual_limit: e.individual_limit.clone(),
         additional_limits: e.additional_limits.clone(),
+        subscription_expires_at: e.subscription_expires_at,
     }
 }
 

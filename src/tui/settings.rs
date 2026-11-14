@@ -14,6 +14,7 @@ use crate::config::{AppConfig, save as save_config};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
+    Language,
     ProxyUrl,
     ProxyNoProxy,
     CacheTtl,
@@ -23,9 +24,11 @@ enum Focus {
     TeamPriority,
     RestartAppServer,
     RestoreDelay,
+    AutoWarmup,
 }
 
 const FOCUS_ORDER: &[Focus] = &[
+    Focus::Language,
     Focus::ProxyUrl,
     Focus::ProxyNoProxy,
     Focus::CacheTtl,
@@ -35,6 +38,7 @@ const FOCUS_ORDER: &[Focus] = &[
     Focus::TeamPriority,
     Focus::RestartAppServer,
     Focus::RestoreDelay,
+    Focus::AutoWarmup,
 ];
 
 pub struct SettingsState {
@@ -204,6 +208,13 @@ impl SettingsState {
 
     fn activate(&mut self) {
         match self.focus {
+            Focus::Language => {
+                self.draft.language = match self.draft.language {
+                    crate::config::Language::En => crate::config::Language::Zh,
+                    crate::config::Language::Zh => crate::config::Language::En,
+                };
+                self.dirty = true;
+            }
             Focus::TeamPriority => {
                 self.draft.use_cfg.team_priority = !self.draft.use_cfg.team_priority;
                 self.dirty = true;
@@ -212,18 +223,36 @@ impl SettingsState {
                 self.draft.use_cfg.restart_app_server = !self.draft.use_cfg.restart_app_server;
                 self.dirty = true;
             }
+            Focus::AutoWarmup => {
+                self.draft.warmup.auto = !self.draft.warmup.auto;
+                self.dirty = true;
+            }
             _ => self.begin_edit(),
         }
     }
 
     fn nudge(&mut self, delta: i32) {
+        if delta == 0 {
+            return;
+        }
         match self.focus {
-            Focus::TeamPriority if delta != 0 => {
+            Focus::Language => {
+                self.draft.language = match self.draft.language {
+                    crate::config::Language::En => crate::config::Language::Zh,
+                    crate::config::Language::Zh => crate::config::Language::En,
+                };
+                self.dirty = true;
+            }
+            Focus::TeamPriority => {
                 self.draft.use_cfg.team_priority = !self.draft.use_cfg.team_priority;
                 self.dirty = true;
             }
-            Focus::RestartAppServer if delta != 0 => {
+            Focus::RestartAppServer => {
                 self.draft.use_cfg.restart_app_server = !self.draft.use_cfg.restart_app_server;
+                self.dirty = true;
+            }
+            Focus::AutoWarmup => {
+                self.draft.warmup.auto = !self.draft.warmup.auto;
                 self.dirty = true;
             }
             _ => {}
@@ -239,7 +268,9 @@ impl SettingsState {
             Focus::TuiRefresh => self.draft.tui.auto_refresh_interval_secs.to_string(),
             Focus::SafetyMargin => format_num(self.draft.use_cfg.safety_margin_7d),
             Focus::RestoreDelay => self.draft.launch.restore_delay_secs.to_string(),
-            Focus::TeamPriority | Focus::RestartAppServer => return,
+            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {
+                return;
+            }
         };
         self.input = value;
         self.cursor = self.input.chars().count();
@@ -270,7 +301,7 @@ impl SettingsState {
                 self.draft.launch.restore_delay_secs =
                     parse_u64(&raw, 1, "launch.restore_delay_secs")?;
             }
-            Focus::TeamPriority | Focus::RestartAppServer => {}
+            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {}
         }
         self.dirty = true;
         Ok(())
@@ -293,12 +324,15 @@ impl SettingsState {
         crate::config::replace_runtime(config.clone());
         self.draft = config;
         self.dirty = false;
-        let mut message = "Saved config.toml".to_string();
+        let mut message = super::locale::t(self.draft.language).saved.to_string();
         if !warnings.is_empty() {
             message.push_str(". ");
             message.push_str(&warnings.join(" "));
         }
-        message.push_str(". Applied in this process now.");
+        message.push_str(match self.draft.language {
+            crate::config::Language::Zh => "。已在本次运行中生效。",
+            crate::config::Language::En => ". Applied in this process now.",
+        });
         SettingsOutcome::Saved { message }
     }
 
@@ -355,8 +389,9 @@ fn char_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
-fn bool_label(value: bool) -> &'static str {
-    if value { "on" } else { "off" }
+fn bool_label(value: bool, language: crate::config::Language) -> &'static str {
+    let text = super::locale::t(language);
+    if value { text.on } else { text.off }
 }
 
 fn field_value(settings: &SettingsState, focus: Focus, value: &str) -> String {
@@ -367,34 +402,27 @@ fn field_value(settings: &SettingsState, focus: Focus, value: &str) -> String {
         return chars.into_iter().collect();
     }
     if value.is_empty() {
-        return "(empty)".to_string();
+        return super::locale::t(settings.draft.language).empty.to_string();
     }
     value.to_string()
 }
 
 /// Explanation of the focused field, shown under the field list. Lines are
 /// separated by `\n` and kept short because the panel does not wrap.
-fn field_hint(focus: Focus) -> &'static str {
+fn field_hint(focus: Focus, language: crate::config::Language) -> &'static str {
+    let text = super::locale::t(language);
     match focus {
-        Focus::ProxyUrl => {
-            "Proxy for usage, login and provider requests (http, https, socks4, socks5, socks5h).\n--proxy and CS_PROXY override it; empty = none."
-        }
-        Focus::ProxyNoProxy => {
-            "Hosts that bypass the proxy, comma-separated (NO_PROXY syntax); empty = none."
-        }
-        Focus::CacheTtl => {
-            "Seconds a usage result is reused before it is fetched again (minimum 1)."
-        }
-        Focus::MaxConcurrent => "Maximum simultaneous usage requests (minimum 1).",
-        Focus::TuiRefresh => "Seconds between refreshes while `t` auto-refresh is on (minimum 30).",
-        Focus::SafetyMargin => "7d headroom % below which auto-select penalizes an account.",
-        Focus::TeamPriority => "Prefer Team-plan accounts when auto-selecting.",
-        Focus::RestartAppServer => {
-            "After the live auth.json changes (use, TUI u, login), restart a running Codex\napp-server daemon so new sessions use the account. Interrupts turns in progress.\noff = leave the daemon alone and only show the manual command."
-        }
-        Focus::RestoreDelay => {
-            "Seconds `launch` waits before restoring auth.json after starting Codex\n(minimum 1; 0 would restore it before Codex has read it)."
-        }
+        Focus::Language => text.hint_language,
+        Focus::ProxyUrl => text.hint_proxy_url,
+        Focus::ProxyNoProxy => text.hint_proxy_no_proxy,
+        Focus::CacheTtl => text.hint_cache_ttl,
+        Focus::MaxConcurrent => text.hint_max_concurrent,
+        Focus::TuiRefresh => text.hint_tui_refresh,
+        Focus::SafetyMargin => text.hint_safety_margin,
+        Focus::TeamPriority => text.hint_team_priority,
+        Focus::RestartAppServer => text.hint_restart_app_server,
+        Focus::RestoreDelay => text.hint_restore_delay,
+        Focus::AutoWarmup => text.hint_auto_warmup,
     }
 }
 
@@ -429,10 +457,11 @@ pub fn render_settings_tab(
     hitmap: &mut HitMap,
     upgrade_instructions: Option<&[String]>,
 ) {
+    let text = super::locale::t(settings.draft.language);
     let title = if settings.dirty {
-        " Settings * "
+        text.settings_dirty
     } else {
-        " Settings "
+        text.settings
     };
     let block = Block::default()
         .title(title)
@@ -444,7 +473,10 @@ pub fn render_settings_tab(
     hitmap.settings_body = Some(area);
 
     let mut focused_line = 0usize;
-    let mut lines = vec![Line::from(Span::styled("Proxy / network / TUI", header()))];
+    let mut lines = vec![Line::from(Span::styled(
+        text.section_language.to_string(),
+        header(),
+    ))];
     let mut line_focus: Vec<Option<Focus>> = vec![None];
     if let Some(instructions) = upgrade_instructions {
         for instruction in instructions {
@@ -458,8 +490,24 @@ pub fn render_settings_tab(
 
     push_field(
         settings,
+        Focus::Language,
+        text.language,
+        super::locale::language_name(settings.draft.language, settings.draft.language).to_string(),
+        &mut lines,
+        &mut line_focus,
+        &mut focused_line,
+    );
+    lines.push(Line::from(""));
+    line_focus.push(None);
+    lines.push(Line::from(Span::styled(
+        text.section_network.to_string(),
+        header(),
+    )));
+    line_focus.push(None);
+    push_field(
+        settings,
         Focus::ProxyUrl,
-        "proxy.url",
+        text.proxy_url,
         field_value(
             settings,
             Focus::ProxyUrl,
@@ -472,7 +520,7 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::ProxyNoProxy,
-        "proxy.no_proxy",
+        text.proxy_no_proxy,
         field_value(
             settings,
             Focus::ProxyNoProxy,
@@ -485,7 +533,7 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::CacheTtl,
-        "cache.ttl",
+        text.cache_ttl,
         field_value(
             settings,
             Focus::CacheTtl,
@@ -498,7 +546,7 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::MaxConcurrent,
-        "network.max_concurrent",
+        text.max_concurrent,
         field_value(
             settings,
             Focus::MaxConcurrent,
@@ -511,7 +559,7 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::TuiRefresh,
-        "tui.auto_refresh_interval_secs",
+        text.tui_refresh,
         field_value(
             settings,
             Focus::TuiRefresh,
@@ -523,12 +571,15 @@ pub fn render_settings_tab(
     );
     lines.push(Line::from(""));
     line_focus.push(None);
-    lines.push(Line::from(Span::styled("Selection", header())));
+    lines.push(Line::from(Span::styled(
+        text.section_selection.to_string(),
+        header(),
+    )));
     line_focus.push(None);
     push_field(
         settings,
         Focus::SafetyMargin,
-        "use.safety_margin_7d",
+        text.safety_margin,
         field_value(
             settings,
             Focus::SafetyMargin,
@@ -541,8 +592,8 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::TeamPriority,
-        "use.team_priority",
-        bool_label(settings.draft.use_cfg.team_priority).to_string(),
+        text.team_priority,
+        bool_label(settings.draft.use_cfg.team_priority, settings.draft.language).to_string(),
         &mut lines,
         &mut line_focus,
         &mut focused_line,
@@ -550,25 +601,48 @@ pub fn render_settings_tab(
     push_field(
         settings,
         Focus::RestartAppServer,
-        "use.restart_app_server",
-        bool_label(settings.draft.use_cfg.restart_app_server).to_string(),
+        text.restart_app_server,
+        bool_label(
+            settings.draft.use_cfg.restart_app_server,
+            settings.draft.language,
+        )
+        .to_string(),
         &mut lines,
         &mut line_focus,
         &mut focused_line,
     );
     lines.push(Line::from(""));
     line_focus.push(None);
-    lines.push(Line::from(Span::styled("Launch", header())));
+    lines.push(Line::from(Span::styled(
+        text.section_launch.to_string(),
+        header(),
+    )));
     line_focus.push(None);
     push_field(
         settings,
         Focus::RestoreDelay,
-        "launch.restore_delay_secs",
+        text.restore_delay,
         field_value(
             settings,
             Focus::RestoreDelay,
             &settings.draft.launch.restore_delay_secs.to_string(),
         ),
+        &mut lines,
+        &mut line_focus,
+        &mut focused_line,
+    );
+    lines.push(Line::from(""));
+    line_focus.push(None);
+    lines.push(Line::from(Span::styled(
+        text.section_warmup.to_string(),
+        header(),
+    )));
+    line_focus.push(None);
+    push_field(
+        settings,
+        Focus::AutoWarmup,
+        text.auto_warmup,
+        bool_label(settings.draft.warmup.auto, settings.draft.language).to_string(),
         &mut lines,
         &mut line_focus,
         &mut focused_line,
@@ -585,12 +659,12 @@ pub fn render_settings_tab(
         )));
         line_focus.push(None);
     } else {
-        for hint_line in field_hint(settings.focus).lines() {
+        for hint_line in field_hint(settings.focus, settings.draft.language).lines() {
             lines.push(Line::from(Span::styled(hint_line, dim())));
             line_focus.push(None);
         }
         lines.push(Line::from(Span::styled(
-            "click field  j/k move  enter/space edit or toggle  ←/→ toggle  s save  esc cancel edit",
+            text.settings_help,
             dim(),
         )));
         line_focus.push(None);
@@ -642,12 +716,14 @@ mod tests {
     fn settings_cover_every_owned_config_key() {
         // Fails to compile if AppConfig gains a product-owned key the form missed.
         let AppConfig {
+            language: _,
             proxy,
             cache,
             network,
             tui,
             use_cfg,
             launch,
+            warmup,
         } = AppConfig::default();
         let crate::config::ProxyConfig {
             url: _,
@@ -666,7 +742,8 @@ mod tests {
         let crate::config::LaunchConfig {
             restore_delay_secs: _,
         } = launch;
-        assert_eq!(FOCUS_ORDER.len(), 9);
+        let crate::config::WarmupConfig { auto: _ } = warmup;
+        assert_eq!(FOCUS_ORDER.len(), 11);
     }
 
     fn type_value(settings: &mut SettingsState, value: &str) {

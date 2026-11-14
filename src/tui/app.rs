@@ -216,6 +216,7 @@ type ResetCardRefreshResult = (
 pub enum Tab {
     #[default]
     Accounts,
+    Sync,
     Providers,
     Settings,
     Logs,
@@ -239,6 +240,12 @@ pub struct App {
     pub provider_launch: Option<super::provider_launch::ProviderLaunchState>,
     /// Live editor for `config.toml` (Settings tab).
     pub settings: super::settings::SettingsState,
+    /// Manual Redis group sync.
+    pub sync_page: super::sync_page::SyncPage,
+    sync_rx: tokio::sync::mpsc::Receiver<Result<String, String>>,
+    sync_tx: tokio::sync::mpsc::Sender<Result<String, String>>,
+    /// Active interface language. English until Settings saves another choice.
+    pub language: crate::config::Language,
     /// Active top-level tab.
     pub active_tab: Tab,
     pub selected: usize,
@@ -293,6 +300,8 @@ pub struct App {
     pub auto_refresh_enabled: bool,
     pub auto_refresh_interval: Duration,
     pub next_auto_refresh: Option<Instant>,
+    auto_warmup_enabled: bool,
+    auto_warmed_windows: BTreeSet<String>,
     pub detail_visible: bool,
     pub help_popup: Option<super::popup::PopupState>,
     pub menu: Option<super::menu::MenuState>,
@@ -324,7 +333,14 @@ impl App {
         let (reset_card_refresh_tx, reset_card_refresh_rx) = tokio::sync::mpsc::channel(64);
         let (model_tx, model_rx) = tokio::sync::mpsc::channel(32);
         let (switch_tx, switch_rx) = tokio::sync::mpsc::channel(4);
+        let (sync_tx, sync_rx) = tokio::sync::mpsc::channel(4);
         let cfg = crate::config::get();
+        let open_tab = std::env::var("CS_OPEN_TAB").ok();
+        let active_tab = match open_tab.as_deref() {
+            Some("settings") => Tab::Settings,
+            Some("sync") => Tab::Sync,
+            _ => Tab::default(),
+        };
         App {
             log_writer: crate::logging::tui_log_writer(),
             log_scroll: 0,
@@ -337,7 +353,11 @@ impl App {
             provider_form: None,
             provider_launch: None,
             settings: super::settings::SettingsState::from_config(cfg.clone()),
-            active_tab: Tab::default(),
+            sync_page: super::sync_page::SyncPage::load(),
+            sync_rx,
+            sync_tx,
+            language: cfg.language,
+            active_tab,
             selected: 0,
             search: None,
             search_active: false,
@@ -378,6 +398,8 @@ impl App {
             auto_refresh_enabled: false,
             auto_refresh_interval: Duration::from_secs(cfg.tui.auto_refresh_interval_secs),
             next_auto_refresh: None,
+            auto_warmup_enabled: cfg.warmup.auto,
+            auto_warmed_windows: BTreeSet::new(),
             detail_visible: true,
             help_popup: None,
             menu: None,
@@ -816,7 +838,8 @@ impl App {
     pub fn cycle_tab(&mut self, forward: bool) {
         let next = if forward {
             match self.active_tab {
-                Tab::Accounts => Tab::Providers,
+                Tab::Accounts => Tab::Sync,
+                Tab::Sync => Tab::Providers,
                 Tab::Providers => Tab::Settings,
                 Tab::Settings => Tab::Logs,
                 Tab::Logs => Tab::Accounts,
@@ -824,12 +847,43 @@ impl App {
         } else {
             match self.active_tab {
                 Tab::Accounts => Tab::Logs,
-                Tab::Providers => Tab::Accounts,
+                Tab::Sync => Tab::Accounts,
+                Tab::Providers => Tab::Sync,
                 Tab::Settings => Tab::Providers,
                 Tab::Logs => Tab::Settings,
             }
         };
         self.select_tab(next);
+    }
+
+    pub fn poll_sync(&mut self) {
+        while let Ok(result) = self.sync_rx.try_recv() {
+            self.sync_page.finish(result);
+        }
+    }
+
+    pub fn handle_sync_key(&mut self, code: KeyCode) {
+        if self.sync_page.busy {
+            return;
+        }
+        let command = self.sync_page.handle_key(code, self.language);
+        let pull = match command {
+            super::sync_page::SyncCommand::None => return,
+            super::sync_page::SyncCommand::Pull => true,
+            super::sync_page::SyncCommand::Push => false,
+        };
+        let settings = self.sync_page.settings.clone();
+        let language = self.language;
+        self.sync_page.begin();
+        let tx = self.sync_tx.clone();
+        tokio::spawn(async move {
+            let result = if pull {
+                crate::sync_store::pull(&settings, language).await
+            } else {
+                crate::sync_store::push(&settings, language).await
+            };
+            let _ = tx.send(result.map_err(|error| error.to_string())).await;
+        });
     }
 
     /// Switch to `tab` (no-op if already there). Reloads Settings from disk
@@ -840,10 +894,11 @@ impl App {
         }
         self.active_tab = tab;
         self.status_msg = None;
-        if self.active_tab == Tab::Settings && !self.settings.is_dirty() {
-            let cfg = crate::config::load_current().unwrap_or_else(|_| crate::config::get());
-            self.settings = super::settings::SettingsState::from_config(cfg);
-        }
+            if self.active_tab == Tab::Settings && !self.settings.is_dirty() {
+                let cfg = crate::config::load_current().unwrap_or_else(|_| crate::config::get());
+                self.language = cfg.language;
+                self.settings = super::settings::SettingsState::from_config(cfg);
+            }
     }
 
     /// Handle a mouse event against the last frame's hit map.
@@ -1004,6 +1059,7 @@ impl App {
                                 self.last_list_click = None;
                             }
                         }
+                        Tab::Sync => self.last_list_click = None,
                         Tab::Settings => {
                             if let Some(index) = self.hitmap.settings_field_at(col, row) {
                                 self.settings.click_field(index);
@@ -1181,9 +1237,13 @@ impl App {
 
     pub fn handle_settings_key(&mut self, code: KeyCode) {
         match self.settings.handle_key(code) {
-            super::settings::SettingsOutcome::Continue => {}
+            super::settings::SettingsOutcome::Continue => {
+                self.language = self.settings.draft.language;
+                self.auto_warmup_enabled = self.settings.draft.warmup.auto;
+            }
             super::settings::SettingsOutcome::Saved { message } => {
                 self.apply_saved_settings();
+                self.language = crate::config::get().language;
                 self.set_status(message, 8);
             }
         }
@@ -1193,6 +1253,7 @@ impl App {
         let cfg = crate::config::get();
         self.auto_refresh_interval = Duration::from_secs(cfg.tui.auto_refresh_interval_secs.max(1));
         self.usage_limiter = Arc::new(Semaphore::new(cfg.network.max_concurrent.max(1)));
+        self.auto_warmup_enabled = cfg.warmup.auto;
     }
 
     pub fn provider_select_next(&mut self) {
@@ -1817,9 +1878,13 @@ impl App {
     }
 
     fn spawn_warmup(&mut self, alias: String) {
+        self.spawn_warmup_after_window(alias, false);
+    }
+
+    fn spawn_warmup_after_window(&mut self, alias: String, allow_weekly: bool) -> bool {
         // Skip if this alias already has an in-flight warmup task.
         if self.is_warmup_in_flight(&alias) {
-            return;
+            return false;
         }
         let task_id = self.warmup_next_id;
         self.warmup_next_id += 1;
@@ -1830,18 +1895,22 @@ impl App {
             Err(e) => {
                 self.warmup_tasks.remove(&task_id);
                 self.set_status_error(format!("Path error for {alias}: {e}"), 5);
-                return;
+                return false;
             }
         };
         let tx = self.warmup_sender.clone();
         let limiter = self.usage_limiter.clone();
         tokio::spawn(async move {
             let _permit = limiter.acquire().await;
-            let result = crate::warmup::warmup_account(&alias, &path)
-                .await
-                .map_err(|e| format!("{e:#}"));
+            let result = if allow_weekly {
+                crate::warmup::warmup_account_after_window(&alias, &path).await
+            } else {
+                crate::warmup::warmup_account(&alias, &path).await
+            }
+            .map_err(|e| format!("{e:#}"));
             let _ = tx.send((task_id, alias, result)).await;
         });
+        true
     }
 
     pub fn poll_update(&mut self) {
@@ -2751,7 +2820,7 @@ impl App {
                         }
                         Err(e) => self.set_status_error(format!("Rename failed: {e}"), 5),
                     },
-                    Tab::Settings | Tab::Logs => {}
+                    Tab::Sync | Tab::Settings | Tab::Logs => {}
                 }
                 return false;
             }
@@ -2951,6 +3020,63 @@ impl App {
         );
     }
 
+    pub fn run_due_auto_warmup(&mut self) {
+        if !self.auto_warmup_enabled || self.switch_in_flight() {
+            return;
+        }
+        let now = crate::auth::now_unix_secs();
+        let mut planned: Vec<(String, Option<i64>, Option<i64>)> = Vec::new();
+        for entry in &self.accounts {
+            let UsageStatus::Loaded(usage) = &entry.usage else {
+                continue;
+            };
+            if self.is_warmup_in_flight(&entry.alias) {
+                continue;
+            }
+            let five = due_reset(usage.primary.as_ref().and_then(|window| window.resets_at), now)
+                .filter(|ts| {
+                    !self
+                        .auto_warmed_windows
+                        .contains(&warmup_window_key(&entry.alias, "5h", *ts))
+                });
+            let seven = due_reset(usage.secondary.as_ref().and_then(|window| window.resets_at), now)
+                .filter(|ts| {
+                    !self
+                        .auto_warmed_windows
+                        .contains(&warmup_window_key(&entry.alias, "7d", *ts))
+                });
+            if five.is_none() && seven.is_none() {
+                continue;
+            }
+            planned.push((entry.alias.clone(), five, seven));
+        }
+        let mut due = Vec::new();
+        for (alias, five, seven) in planned {
+            let weekly_only = five.is_none();
+            if !self.spawn_warmup_after_window(alias.clone(), weekly_only) {
+                continue;
+            }
+            if let Some(ts) = five {
+                self.auto_warmed_windows
+                    .insert(warmup_window_key(&alias, "5h", ts));
+            }
+            if let Some(ts) = seven {
+                self.auto_warmed_windows
+                    .insert(warmup_window_key(&alias, "7d", ts));
+            }
+            due.push(alias);
+        }
+        if due.is_empty() {
+            return;
+        }
+        let label = if self.language == crate::config::Language::Zh {
+            "自动预热"
+        } else {
+            "Auto warmup"
+        };
+        self.set_status(format!("{label}: {}", due.join(", ")), 6);
+    }
+
     pub fn tick(&mut self) {
         if let Some(expiry) = self.status_expiry
             && Instant::now() >= expiry
@@ -2966,6 +3092,17 @@ impl App {
         self.warmup_tasks
             .retain(|_, (_, started)| now.duration_since(*started) < WARMUP_TASK_TIMEOUT);
     }
+}
+
+const AUTO_WARMUP_DELAY_SECS: i64 = 60;
+
+fn due_reset(resets_at: Option<i64>, now: i64) -> Option<i64> {
+    let ts = resets_at?;
+    (now >= ts.saturating_add(AUTO_WARMUP_DELAY_SECS)).then_some(ts)
+}
+
+fn warmup_window_key(alias: &str, window: &str, resets_at: i64) -> String {
+    format!("{alias}:{window}:{resets_at}")
 }
 
 pub async fn run() -> Result<()> {
@@ -3025,8 +3162,10 @@ async fn run_app(
         app.run_due_reset_card_cooldown();
         app.poll_model_results();
         app.poll_update();
+        app.poll_sync();
         app.tick();
         app.run_due_auto_refresh();
+        app.run_due_auto_warmup();
         app.ensure_models_loaded_for_selected();
 
         terminal
@@ -3073,6 +3212,10 @@ async fn run_app(
                     }
                     if app.active_tab == Tab::Settings && app.settings.is_editing() {
                         app.handle_settings_key(key.code);
+                        continue;
+                    }
+                    if app.active_tab == Tab::Sync && app.sync_page.is_editing() {
+                        app.handle_sync_key(key.code);
                         continue;
                     }
                     if app.provider_launch.is_some() {
@@ -3312,6 +3455,10 @@ async fn dispatch_main_key(
                 } else {
                     MainKeyOutcome::Continue
                 }
+            }
+            Tab::Sync => {
+                app.handle_sync_key(code);
+                MainKeyOutcome::Continue
             }
             Tab::Providers => {
                 app.handle_provider_list_key(code);
@@ -4269,7 +4416,7 @@ mod tests {
         ));
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
 
-        for expected in [Tab::Accounts, Tab::Providers, Tab::Settings, Tab::Logs] {
+        for expected in [Tab::Accounts, Tab::Sync, Tab::Providers, Tab::Settings, Tab::Logs] {
             terminal
                 .draw(|frame| crate::tui::ui::render(frame, &mut app))
                 .unwrap();
@@ -4298,13 +4445,13 @@ mod tests {
             .hitmap
             .settings_fields
             .iter()
-            .find(|(_, index)| *index == 6)
+            .find(|(_, index)| *index == 7)
             .copied()
             .expect("rendered team_priority hit region");
-        assert_eq!(index, 6);
+        assert_eq!(index, 7);
         let before = app.settings.draft.use_cfg.team_priority;
         app.handle_mouse(left_click(priority.x + 1, priority.y));
-        assert_eq!(app.settings.focused_index(), 6);
+        assert_eq!(app.settings.focused_index(), 7);
         assert_eq!(app.settings.draft.use_cfg.team_priority, !before);
         assert!(app.settings.is_dirty());
         assert!(!app.settings.is_editing());
@@ -4316,11 +4463,11 @@ mod tests {
             .hitmap
             .settings_fields
             .iter()
-            .find(|(_, index)| *index == 0)
+            .find(|(_, index)| *index == 1)
             .copied()
             .expect("rendered proxy.url hit region");
         app.handle_mouse(left_click(url.x + 1, url.y));
-        assert_eq!(app.settings.focused_index(), 0);
+        assert_eq!(app.settings.focused_index(), 1);
         assert!(app.settings.is_editing());
     }
 
@@ -4366,11 +4513,11 @@ mod tests {
             .hitmap
             .settings_fields
             .iter()
-            .find(|(_, index)| *index == 6)
+            .find(|(_, index)| *index == 7)
             .copied()
             .expect("team_priority remains hittable in the map");
         app.handle_mouse(left_click(priority.x + 1, priority.y));
-        assert_eq!(app.settings.focused_index(), 6);
+        assert_eq!(app.settings.focused_index(), 7);
         assert!(!app.settings.is_editing());
     }
 
@@ -6023,6 +6170,8 @@ mod tests {
         let mut app = App::new();
         assert_eq!(app.active_tab, Tab::Accounts);
         app.cycle_tab(true);
+        assert_eq!(app.active_tab, Tab::Sync);
+        app.cycle_tab(true);
         assert_eq!(app.active_tab, Tab::Providers);
         app.cycle_tab(true);
         assert_eq!(app.active_tab, Tab::Settings);
@@ -6036,6 +6185,8 @@ mod tests {
         assert_eq!(app.active_tab, Tab::Settings);
         app.cycle_tab(false);
         assert_eq!(app.active_tab, Tab::Providers);
+        app.cycle_tab(false);
+        assert_eq!(app.active_tab, Tab::Sync);
     }
 
     #[test]

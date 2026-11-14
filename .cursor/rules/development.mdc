@@ -1,0 +1,17 @@
+---
+description: codex-switch 改动边界与凭据安全不变量
+alwaysApply: true
+---
+
+# codex-switch 开发约束
+
+改代码前读 `docs/开发指南.md`。用户可见行为以 `docs/wiki/` 为准。代码注释和提交说明用英文。
+
+- 这是会话开始前的账号管理器。不要加常驻 daemon、内部定时器，或在运行中的 Codex 进程里热替换账号。
+- ChatGPT profile 与 custom provider 分开。`use` 和自动选号只处理 ChatGPT。provider 不写 `auth.json`，key 只进子进程环境变量，不进 argv、日志或 JSON。
+- 写活 `auth.json` 持有 `auth.lock`；`launch` 暂存持有 `launch.lock`。凭据和缓存原子替换，切换失败要回滚。
+- refresh 轮换用 compare-and-swap。写不回 profile 就是失败，不能再用这份响应发请求，也不能为了重试再消耗一次新 refresh token。
+- `launch` 在选号、消耗重置卡、创建 provider run 或写入凭据之前完成 Codex 版本检查。`--no-daemon` 探测失败则不要暂存凭据。
+- JSON 模式的 stdout 只能有一个结构化信封；进度和诊断走 stderr。
+- 测试覆盖用户状态时，把 `HOME`、`CODEX_HOME`、`CODEX_SWITCH_HOME` 指到临时目录。不要提交 token、auth 文件或未脱敏日志。
+- 有行为契约的改动先补会失败的回归测试。评分逻辑留在 `src/usage/scoring.rs`，保持无 I/O。快捷键只改 `src/tui/keymap.rs` 的 `KEYMAP`。

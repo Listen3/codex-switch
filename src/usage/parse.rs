@@ -141,6 +141,22 @@ pub(super) fn parse_usage_checked(body: &Value) -> Result<UsageInfo> {
     Ok(usage)
 }
 
+pub(super) fn parse_subscription_expires_at(body: &Value) -> Option<i64> {
+    fn one(value: &Value) -> Option<i64> {
+        let raw = value.get("active_until")?.as_str()?;
+        chrono::DateTime::parse_from_rfc3339(raw)
+            .ok()
+            .map(|time| time.timestamp())
+    }
+    if let Some(timestamp) = one(body) {
+        return Some(timestamp);
+    }
+    let list = body
+        .as_array()
+        .or_else(|| body.get("subscriptions").and_then(Value::as_array))?;
+    list.iter().filter_map(one).max()
+}
+
 pub fn parse_usage(body: &Value) -> UsageInfo {
     let primary_raw = body
         .pointer("/rate_limit/primary_window")
@@ -264,6 +280,7 @@ pub fn parse_usage(body: &Value) -> UsageInfo {
         rate_limit_reached_type,
         individual_limit,
         additional_limits,
+        subscription_expires_at: None,
     }
 }
 

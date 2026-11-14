@@ -1001,6 +1001,15 @@ fn ensure_live_not_older(
 ///
 /// A profile that does not exist yet has nothing to protect, so this doubles as
 /// the create path; callers that require an existing profile check that first.
+/// Write one saved profile from an explicit group sync.
+///
+/// An existing alias keeps its account identity and will not accept an older
+/// refresh token. A new alias is created.
+pub fn save_synced_auth(alias: &str, incoming: &serde_json::Value) -> Result<()> {
+    let _transaction = lock_auth_transaction()?;
+    write_profile_credentials(alias, incoming)
+}
+
 fn write_profile_credentials(alias: &str, incoming: &serde_json::Value) -> Result<()> {
     validate_alias(alias)?;
     crate::auth::validate_managed_auth_value(incoming)?;

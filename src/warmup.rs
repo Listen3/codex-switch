@@ -810,6 +810,21 @@ pub enum WarmupOutcome {
 /// reporting success. Accounts whose usage shows only a 7-day window are
 /// skipped — there is no 5h countdown to open.
 pub async fn warmup_account(alias: &str, profile_path: &Path) -> Result<WarmupOutcome> {
+    warmup_account_inner(alias, profile_path, false).await
+}
+
+/// Same as [`warmup_account`], but a 7-day-only account is warmed too.
+///
+/// Used when a weekly window has just reset and there is no 5h window to open.
+pub async fn warmup_account_after_window(alias: &str, profile_path: &Path) -> Result<WarmupOutcome> {
+    warmup_account_inner(alias, profile_path, true).await
+}
+
+async fn warmup_account_inner(
+    alias: &str,
+    profile_path: &Path,
+    allow_weekly: bool,
+) -> Result<WarmupOutcome> {
     let usage = match crate::cache::get(alias) {
         Some(usage) => Some(usage),
         None => {
@@ -827,10 +842,13 @@ pub async fn warmup_account(alias: &str, profile_path: &Path) -> Result<WarmupOu
             }
         }
     };
-    if usage
+    let no_five_hour = usage
         .as_ref()
-        .is_some_and(|u| !crate::usage::usage_has_five_hour_warmup_target(u))
-    {
+        .is_some_and(|u| !crate::usage::usage_has_five_hour_warmup_target(u));
+    let no_window = usage
+        .as_ref()
+        .is_some_and(|u| u.primary.is_none() && u.secondary.is_none());
+    if no_five_hour && (!allow_weekly || no_window) {
         debug!("[{alias}] no 5h window, skipping warmup");
         return Ok(WarmupOutcome::SkippedNoFiveHour);
     }

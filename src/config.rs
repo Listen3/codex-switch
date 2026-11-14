@@ -10,9 +10,19 @@ static CONFIG: OnceLock<RwLock<AppConfig>> = OnceLock::new();
 static STARTUP_WARNINGS: OnceLock<Vec<String>> = OnceLock::new();
 static CLI_PROXY: OnceLock<Option<String>> = OnceLock::new();
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    #[default]
+    En,
+    #[serde(alias = "cn", alias = "chinese")]
+    Zh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
+    pub language: Language,
     pub proxy: ProxyConfig,
     pub cache: CacheConfig,
     pub network: NetworkConfig,
@@ -22,6 +32,23 @@ pub struct AppConfig {
     pub use_cfg: UseConfig,
     #[serde(default)]
     pub launch: LaunchConfig,
+    #[serde(default)]
+    pub warmup: WarmupConfig,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            language: Language::En,
+            proxy: ProxyConfig::default(),
+            cache: CacheConfig::default(),
+            network: NetworkConfig::default(),
+            tui: TuiConfig::default(),
+            use_cfg: UseConfig::default(),
+            launch: LaunchConfig::default(),
+            warmup: WarmupConfig::default(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -135,6 +162,20 @@ impl Default for LaunchConfig {
         Self {
             restore_delay_secs: 3,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WarmupConfig {
+    /// Warm an account one minute after its 5h or 7d window resets.
+    /// Only runs while the TUI is open.
+    pub auto: bool,
+}
+
+impl Default for WarmupConfig {
+    fn default() -> Self {
+        Self { auto: false }
     }
 }
 

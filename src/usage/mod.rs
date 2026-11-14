@@ -101,6 +101,9 @@ pub struct UsageInfo {
     pub individual_limit: Option<Box<SpendControlLimit>>,
     /// Per-feature rate limits from `additional_rate_limits[]` (e.g. codex_other).
     pub additional_limits: Vec<AdditionalRateLimit>,
+    /// Paid subscription period end (`active_until`), unix seconds.
+    /// Absent for free plans and when the subscription request fails.
+    pub subscription_expires_at: Option<i64>,
 }
 
 /// One assembled display row for an additional-limit pool. Pure data,

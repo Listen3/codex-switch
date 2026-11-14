@@ -39,7 +39,11 @@ pub mod profile;
 #[allow(dead_code)]
 mod provider;
 #[allow(dead_code)]
+mod remote_store;
+#[allow(dead_code)]
 mod signals;
+#[allow(dead_code)]
+mod sync_store;
 #[allow(dead_code)]
 mod tui;
 #[allow(dead_code)]

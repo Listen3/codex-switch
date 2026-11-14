@@ -62,6 +62,15 @@ codex-switch launch       # 用最佳账号启动 Codex
 - 直装版 `self-update` 同时校验 SHA-256 与 GitHub 构建来源，执行时会调用 `gh attestation verify`；使用前需安装当前版 [GitHub CLI](https://cli.github.com/)。
 - 支持 macOS、Linux、Windows。
 
+## 本 fork 增加的功能
+
+这个 fork 保留上游的账号管理，并增加：
+
+- **账号同步。** TUI 的「同步」页把这台电脑已保存的 ChatGPT 账号存到 Redis。分组名默认是计算机名，可以修改；上传会覆盖线上同名分组，拉取会更新本地同名账号。支持 `redis://`、Upstash 的 `rediss://` 和 `https://` REST 地址。上传内容包含每个账号的 `auth.json`，Redis 必须只给自己用。
+- **语言。** 设置里默认英语，可以切换成中文，账号、提供方、设置、日志和同步页会一起切换。
+- **订阅到期。** 账号表增加「到期」列，数据来自 `GET /backend-api/subscriptions` 的 `active_until`。刷新该行后才会出现。5 小时和 7 天列仍是额度窗口，不是订阅到期。
+- **自动预热。** 设置里可以打开：某个账号的 5 小时或 7 天窗口重置满 1 分钟后自动预热一次。只在 TUI 窗口开着时运行。
+
 > **从 `0.0.x` 旧版本升级？** 本轮发布刻意做了两个破坏性变更：版本号改为日历格式（`YYYYMMDD.N.0`，一眼可读版本分配日期且仍按 SemVer 正常排序升级），macOS/Linux 安装位置从 `/usr/local/bin` 改为用户级 `$HOME/.local/bin`（`self-update` 不再需要 `sudo`）。正常 `self-update` 或重跑一次安装脚本即可迁移；账号与配置全部保留。全部破坏性变更及原因见 [Updating](https://github.com/xjoker/codex-switch/wiki/Updating)。
 
 > **从带旧 daemon 的版本升级？** daemon 已删除。旧的 LaunchAgent、systemd 单元、Windows 计划任务（或旧版 `self-update`）以 daemon 方式启动新二进制时，新版本会删除这条旧注册并退出，而不是每次启动都失败；也可以手动运行 `codex-switch daemon uninstall` 完成同样的清理。旧 `[daemon]` 配置中的 `cache_refresh_interval_secs`、`auto_warmup` 等字段可以删除。见 [Updating](https://github.com/xjoker/codex-switch/wiki/Updating#migrate-from-the-removed-daemon)。

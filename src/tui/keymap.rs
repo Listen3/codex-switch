@@ -18,6 +18,7 @@ pub enum Section {
     Batch,
     Provider,
     Settings,
+    Sync,
     Logs,
     Global,
 }
@@ -31,6 +32,7 @@ impl Section {
             Section::Batch => "Batch actions  (open via Enter when accounts marked)",
             Section::Provider => "Providers tab (Beta)",
             Section::Settings => "Settings tab",
+            Section::Sync => "Sync",
             Section::Logs => "Logs tab",
             Section::Global => "Global",
         }
@@ -253,6 +255,24 @@ pub const KEYMAP: &[Binding] = &[
         keys: "end",
         section: Section::Logs,
         label: "jump to latest log",
+        in_status_bar: false,
+    },
+    Binding {
+        keys: "enter",
+        section: Section::Sync,
+        label: "edit field, or pull / push the focused action",
+        in_status_bar: false,
+    },
+    Binding {
+        keys: "p",
+        section: Section::Sync,
+        label: "pull this group",
+        in_status_bar: false,
+    },
+    Binding {
+        keys: "u",
+        section: Section::Sync,
+        label: "upload this group",
         in_status_bar: false,
     },
     // Global

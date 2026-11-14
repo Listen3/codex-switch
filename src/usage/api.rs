@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use crate::auth::{self, CLIENT_ID};
 use crate::http_retry::{self, ReplaySafety};
 
-use super::parse::parse_usage_checked;
+use super::parse::{parse_subscription_expires_at, parse_usage_checked};
 use super::reset_credits::merge_cached_reset_credits;
 use super::{
     ImportValidation, MAX_RETRIES, ProfileTokens, RETRY_DELAY, Refresh, RefreshedTokens,
@@ -981,6 +981,48 @@ async fn fetch_usage_retried_inner(
     })
 }
 
+const SUBSCRIPTIONS_URL: &str = "https://chatgpt.com/backend-api/subscriptions";
+
+async fn with_subscription(
+    usage: Result<UsageInfo>,
+    client: &reqwest::Client,
+    access_token: &str,
+    account_id: Option<&str>,
+    is_fedramp: bool,
+) -> Result<UsageInfo> {
+    let mut usage = usage?;
+    usage.subscription_expires_at =
+        fetch_subscription_expires_at(client, access_token, account_id, is_fedramp).await;
+    Ok(usage)
+}
+
+async fn fetch_subscription_expires_at(
+    client: &reqwest::Client,
+    access_token: &str,
+    account_id: Option<&str>,
+    is_fedramp: bool,
+) -> Option<i64> {
+    let mut url = SUBSCRIPTIONS_URL.to_string();
+    if let Some(account_id) = account_id.filter(|value| !value.trim().is_empty()) {
+        url.push_str("?account_id=");
+        url.push_str(&urlencoding::encode(account_id));
+    }
+    let request = apply_account_routing_headers(
+        client
+            .get(url)
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("Accept", "application/json"),
+        account_id,
+        is_fedramp,
+    );
+    let response = request.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body: Value = response.json().await.ok()?;
+    parse_subscription_expires_at(&body)
+}
+
 /// Fetch usage; on 401/403 automatically refresh the token and retry once.
 ///
 /// Returns tokens and result separately: a rotated `refresh_token` is the only
@@ -1117,7 +1159,14 @@ async fn fetch_usage_capturing_refresh(
                         anyhow::anyhow!("failed to parse usage response (HTTP {status}): {e}")
                     })?;
                     debug!(alias, status = %status, bytes = resp.body.len(), "Usage API response parsed after proactive refresh");
-                    return parse_usage_checked(&body);
+                    return with_subscription(
+                        parse_usage_checked(&body),
+                        &client,
+                        &bearer,
+                        account_id,
+                        is_fedramp,
+                    )
+                    .await;
                 }
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     return Err(rate_limited(alias, account_id, &resp));
@@ -1157,7 +1206,14 @@ async fn fetch_usage_capturing_refresh(
         let body: Value = serde_json::from_slice(&resp.body)
             .map_err(|e| anyhow::anyhow!("failed to parse usage response (HTTP {status}): {e}"))?;
         debug!(alias, status = %status, bytes = resp.body.len(), "Usage API response parsed");
-        return parse_usage_checked(&body);
+        return with_subscription(
+            parse_usage_checked(&body),
+            &client,
+            access_token,
+            account_id,
+            is_fedramp,
+        )
+        .await;
     }
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err(rate_limited(alias, account_id, &resp));
@@ -1208,7 +1264,14 @@ async fn fetch_usage_capturing_refresh(
                             "failed to parse usage response after refresh (HTTP {status2}): {e}"
                         )
                     })?;
-                    return parse_usage_checked(&body);
+                    return with_subscription(
+                        parse_usage_checked(&body),
+                        &client,
+                        &bearer,
+                        account_id,
+                        is_fedramp,
+                    )
+                    .await;
                 }
                 if status2 == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     return Err(rate_limited(alias, account_id, &resp2));

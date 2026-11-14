@@ -16,7 +16,7 @@ use super::theme::{
 };
 use crate::jwt::PlanKind;
 use crate::output::{
-    format_local_time, format_reset_short, format_reset_time, reset_credits_count,
+    format_local_time, format_reset_short, format_reset_time, format_subscription_date, reset_credits_count,
 };
 use crate::usage::{UsageInfo, format_credits_amount, is_available};
 
@@ -47,23 +47,35 @@ pub fn render(f: &mut Frame, app: &mut App) {
     match app.active_tab {
         Tab::Accounts => {
             let content = vertical[1];
+            let groups = app.sync_page.group_names();
+            let list_area = if groups.len() >= 2 {
+                let split = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(6)])
+                    .split(content);
+                render_group_tabs(f, split[0], &groups, app.language);
+                split[1]
+            } else {
+                content
+            };
             let detail_height = if app.detail_visible {
-                detail_panel_height(app).min(content.height.saturating_sub(6))
+                detail_panel_height(app).min(list_area.height.saturating_sub(6))
             } else {
                 0
             };
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(6),                // account list
-                    Constraint::Length(detail_height), // detail panel
+                    Constraint::Min(6),
+                    Constraint::Length(detail_height),
                 ])
-                .split(content);
+                .split(list_area);
             render_account_table(f, app, rows[0]);
             if app.detail_visible {
                 render_detail_panel(f, app, rows[1]);
             }
         }
+        Tab::Sync => super::sync_page::render(f, &app.sync_page, vertical[1], app.language),
         Tab::Providers => render_providers_tab(f, app, vertical[1]),
         Tab::Settings => {
             let upgrade_instructions = app.codex_upgrade_instructions();
@@ -85,7 +97,14 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let active_tab = app.active_tab;
     let upgrade_instructions = app.codex_upgrade_instructions();
     if let Some(state) = app.help_popup.as_mut() {
-        let panel = render_help_popup(f, state, active_tab, area, upgrade_instructions.as_deref());
+        let panel = render_help_popup(
+            f,
+            state,
+            active_tab,
+            app.language,
+            area,
+            upgrade_instructions.as_deref(),
+        );
         app.hitmap.overlay = match panel {
             Some(panel) => super::hitmap::OverlayHit::Dismissible { panel },
             None => super::hitmap::OverlayHit::Modal,
@@ -108,9 +127,20 @@ pub fn render(f: &mut Frame, app: &mut App) {
         || app.rename.is_some()
         || app.search_active
         || (app.active_tab == Tab::Settings && app.settings.is_editing())
+        || (app.active_tab == Tab::Sync && app.sync_page.is_editing())
     {
         app.hitmap.overlay = super::hitmap::OverlayHit::Modal;
     }
+}
+
+fn render_group_tabs(f: &mut Frame, area: Rect, groups: &[String], language: crate::config::Language) {
+    let text = super::locale::t(language);
+    let mut spans = vec![Span::styled(text.all_accounts, highlight())];
+    for name in groups {
+        spans.push(Span::styled("  ", base()));
+        spans.push(Span::styled(format!(" {name} "), base().fg(C_GRAY)));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)).style(base()), area);
 }
 
 fn render_logs(f: &mut Frame, app: &mut App, area: Rect) {
@@ -136,13 +166,20 @@ fn render_logs(f: &mut Frame, app: &mut App, area: Rect) {
     let end = visual_lines.len().saturating_sub(bottom_offset);
     let start = end.saturating_sub(visible_rows);
     let text = visual_lines[start..end].join("\n");
+    let shown = if app.language == crate::config::Language::Zh
+        && visual_lines.as_slice() == ["No logs in this session.".to_string()]
+    {
+        super::locale::t(app.language).no_logs.to_string()
+    } else {
+        text
+    };
     let block = Block::default()
-        .title(" Session logs ")
+        .title(super::locale::t(app.language).logs_title)
         .borders(Borders::ALL)
         .border_style(base().fg(C_BLUE))
         .style(base());
     f.render_widget(
-        Paragraph::new(text).style(base().fg(C_GRAY)).block(block),
+        Paragraph::new(shown).style(base().fg(C_GRAY)).block(block),
         area,
     );
 }
@@ -175,6 +212,7 @@ fn render_help_popup(
     f: &mut Frame,
     state: &mut popup::PopupState,
     active_tab: Tab,
+    language: crate::config::Language,
     area: ratatui::layout::Rect,
     upgrade_instructions: Option<&[String]>,
 ) -> Option<Rect> {
@@ -197,6 +235,7 @@ fn render_help_popup(
     // Compute key column width for alignment within section
     let active_section = match active_tab {
         Tab::Accounts => keymap::Section::Account,
+        Tab::Sync => keymap::Section::Sync,
         Tab::Providers => keymap::Section::Provider,
         Tab::Settings => keymap::Section::Settings,
         Tab::Logs => keymap::Section::Logs,
@@ -210,8 +249,13 @@ fn render_help_popup(
         .unwrap_or(8);
 
     if active_tab == Tab::Providers {
-        lines.push(Line::from(Span::styled("Providers (Beta)", heading_style)));
-        for description in keymap::PROVIDER_OVERVIEW {
+        let text = super::locale::t(language);
+        lines.push(Line::from(Span::styled(text.tab_providers, heading_style)));
+        for description in [
+            text.provider_line_1,
+            text.provider_line_2,
+            text.provider_line_3,
+        ] {
             lines.push(Line::from(Span::styled(description, label_style)));
         }
         lines.push(Line::from(""));
@@ -222,7 +266,7 @@ fn render_help_popup(
             lines.push(Line::from(""));
         }
         lines.push(Line::from(Span::styled(
-            (*heading).to_string(),
+            super::locale::phrase(language, *heading).to_string(),
             heading_style,
         )));
         for (k, label) in items {
@@ -234,17 +278,18 @@ fn render_help_popup(
                 spans.push(Span::styled(" ".repeat(pad), base()));
             }
             spans.push(Span::styled("  ", base()));
-            spans.push(Span::styled((*label).to_string(), label_style));
+            spans.push(Span::styled(
+                super::locale::phrase(language, *label).to_string(),
+                label_style,
+            ));
             lines.push(Line::from(spans));
         }
     }
+    let text = super::locale::t(language);
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  esc / q / h to close \u{2022} j k arrows / PgUp PgDn / mouse wheel to scroll",
-        dim_style,
-    )));
+    lines.push(Line::from(Span::styled(text.help_close, dim_style)));
 
-    popup::render_popup(f, "Help", &lines, state, area).map(|layout| layout.panel)
+    popup::render_popup(f, text.help_title, &lines, state, area).map(|layout| layout.panel)
 }
 
 fn display_width(s: &str) -> usize {
@@ -284,7 +329,7 @@ fn table_text_widths(
 
     // Base borders, spacing, marker and fixed columns consume 44 cells. The
     // optional 5h pair and Credits column add their widths plus spacing.
-    let fixed_width = 44 + u16::from(show_5h) * 20 + credits_width.unwrap_or(0);
+    let fixed_width = 57 + u16::from(show_5h) * 20 + credits_width.unwrap_or(0);
     let budget = total_width.saturating_sub(fixed_width).max(14);
     let total = u32::from(widths.alias) + u32::from(widths.email) + u32::from(widths.plan);
     let mut excess = total.saturating_sub(u32::from(budget));
@@ -302,17 +347,18 @@ fn table_text_widths(
 
 fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
     if app.accounts.is_empty() {
+        let text = super::locale::t(app.language);
         let block = Block::default()
-            .title(" codex-switch ")
+            .title(text.accounts_title)
             .borders(Borders::ALL)
             .border_style(base().fg(C_BLUE))
             .style(base());
         let hint = Paragraph::new(Line::from(vec![
-            Span::styled("No accounts yet. Press ", base().fg(DIM)),
+            Span::styled(text.empty_accounts_before, base().fg(DIM)),
             Span::styled("a", base().fg(C_YELLOW).add_modifier(Modifier::BOLD)),
-            Span::styled(" to add one, or ", base().fg(DIM)),
+            Span::styled(text.empty_accounts_mid, base().fg(DIM)),
             Span::styled("q", base().fg(C_YELLOW).add_modifier(Modifier::BOLD)),
-            Span::styled(" to quit.", base().fg(DIM)),
+            Span::styled(text.empty_accounts_after, base().fg(DIM)),
         ]))
         .block(block)
         .alignment(ratatui::layout::Alignment::Center);
@@ -349,12 +395,14 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
     });
 
     let hdr = base().fg(C_CYAN).add_modifier(Modifier::BOLD);
+    let text = super::locale::t(app.language);
     let mut header_cells = vec![
         Cell::from(" ").style(base().fg(DIM)),
-        Cell::from("Alias").style(hdr),
-        Cell::from("Email").style(hdr),
-        Cell::from("Plan").style(hdr),
-        Cell::from("Status").style(hdr),
+        Cell::from(text.col_alias).style(hdr),
+        Cell::from(text.col_email).style(hdr),
+        Cell::from(text.col_plan).style(hdr),
+        Cell::from(text.col_expires).style(hdr),
+        Cell::from(text.col_status).style(hdr),
     ];
     if show_5h {
         header_cells.push(Cell::from("5h").style(hdr));
@@ -364,9 +412,9 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
         header_cells.push(Cell::from("5h Reset").style(hdr));
     }
     header_cells.push(Cell::from("7d Reset").style(hdr));
-    header_cells.push(Cell::from("Cards").style(hdr));
+    header_cells.push(Cell::from(text.col_cards).style(hdr));
     if show_credits {
-        header_cells.push(Cell::from("Credits").style(hdr));
+        header_cells.push(Cell::from(text.col_credits).style(hdr));
     }
     let header = Row::new(header_cells).height(1);
 
@@ -565,11 +613,20 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
                 UsageStatus::Loaded(u) => (credits_table_text(u), credits_table_color(u)),
             };
 
+            let (subscription, subscription_color) = subscription_text(&entry.usage);
+
             let mut cells = vec![
                 Cell::from(Span::styled(marker, marker_style)),
                 Cell::from(entry.alias.clone()).style(row_style),
                 Cell::from(email).style(row_style),
                 Cell::from(plan_label).style(plan_style),
+                Cell::from(subscription).style(base().fg(subscription_color).add_modifier(
+                    if is_selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    },
+                )),
                 Cell::from(status_text).style(base().fg(status_color).add_modifier(
                     if is_selected {
                         Modifier::BOLD
@@ -600,26 +657,34 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let loading_count = app.loading_count();
+    let text = super::locale::t(app.language);
     let mut title = if let Some(s) = &app.search {
         format!(
-            " Accounts ({}/{}) [/{s}]",
+            " {} ({}/{}) [/{s}]",
+            text.tab_accounts,
             app.view_indices.len(),
             app.accounts.len(),
             s = s.query
         )
     } else {
-        format!(" Accounts ({})", app.accounts.len())
+        format!(" {} ({})", text.tab_accounts, app.accounts.len())
     };
     if loading_count > 0 {
-        title.push_str(&format!(" -- fetching {}...", loading_count));
+        let fetching = super::locale::phrase(
+            app.language,
+            "fetching",
+        );
+        title.push_str(&format!(" -- {fetching} {loading_count}..."));
     }
     if !app.marked.is_empty() {
-        title.push_str(&format!(" [{} marked]", app.marked.len()));
+        let marked = super::locale::phrase(app.language, "marked");
+        title.push_str(&format!(" [{} {marked}]", app.marked.len()));
     }
     if let Some(secs) = app.auto_refresh_remaining_secs() {
         title.push_str(&format!(" auto:{}", format_auto_refresh_remaining(secs)));
     }
-    title.push_str(&format!(" sort:{} ", app.sort_mode.as_str()));
+    let sort = super::locale::phrase(app.language, "sort");
+    title.push_str(&format!(" {sort}:{} ", app.sort_mode.as_str()));
 
     let mut table_state = TableState::default().with_selected(render_selected);
 
@@ -662,6 +727,7 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(text_widths.alias), // alias
         Constraint::Length(text_widths.email), // email
         Constraint::Length(text_widths.plan),  // plan
+        Constraint::Length(12),                // subscription expiry
         Constraint::Length(8),                 // status
     ];
     if show_5h {
@@ -969,15 +1035,18 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
         }
     };
 
-    let accounts = format!(" Accounts ({}) ", app.accounts.len());
-    let providers = format!(" Providers (Beta) ({}) ", app.providers.len());
-    let settings = " Settings ".to_string();
-    let logs = " Logs ".to_string();
+    let text = super::locale::t(app.language);
+    let accounts = format!(" {} ({}) ", text.tab_accounts, app.accounts.len());
+    let sync = text.sync_tab;
+    let providers = format!(" {} ({}) ", text.tab_providers, app.providers.len());
+    let settings = format!(" {} ", text.tab_settings);
+    let logs = format!(" {} ", text.tab_logs);
     let gap_w = 2u16;
 
     let mut x = area.x;
     let tab_specs = [
         (accounts.as_str(), Tab::Accounts),
+        (sync, Tab::Sync),
         (providers.as_str(), Tab::Providers),
         (settings.as_str(), Tab::Settings),
         (logs.as_str(), Tab::Logs),
@@ -986,7 +1055,7 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
         if i > 0 {
             x = x.saturating_add(gap_w);
         }
-        let width = label.chars().count() as u16;
+        let width = display_width(label) as u16;
         app.hitmap.tabs.push((
             Rect {
                 x,
@@ -1002,12 +1071,14 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let line = Line::from(vec![
         Span::styled(accounts, style(Tab::Accounts)),
         Span::styled("  ", base()),
+        Span::styled(sync, style(Tab::Sync)),
+        Span::styled("  ", base()),
         Span::styled(providers, style(Tab::Providers)),
         Span::styled("  ", base()),
         Span::styled(settings, style(Tab::Settings)),
         Span::styled("  ", base()),
         Span::styled(logs, style(Tab::Logs)),
-        Span::styled("   Tab to switch", base().fg(DIM)),
+        Span::styled(format!("   {}", text.tab_hint), base().fg(DIM)),
     ]);
     f.render_widget(Paragraph::new(line).style(base()), area);
 }
@@ -1015,18 +1086,23 @@ fn render_tab_bar(f: &mut Frame, app: &mut App, area: Rect) {
 /// Providers tab: list configured custom API providers. The stored API key is
 /// never rendered.
 fn render_providers_tab(f: &mut Frame, app: &mut App, area: Rect) {
+    let text = super::locale::t(app.language);
     let block = Block::default()
-        .title(" Custom providers (Beta) ")
+        .title(text.providers_title)
         .borders(Borders::ALL)
         .border_style(base().fg(C_BLUE))
         .style(base());
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let overview: Vec<Line<'static>> = keymap::PROVIDER_OVERVIEW
-        .iter()
-        .map(|description| Line::from(Span::styled(*description, base().fg(C_GRAY))))
-        .collect();
+    let overview: Vec<Line<'static>> = [
+        text.provider_line_1,
+        text.provider_line_2,
+        text.provider_line_3,
+    ]
+    .into_iter()
+    .map(|description| Line::from(Span::styled(description, base().fg(C_GRAY))))
+    .collect();
     let overview_height = u16::try_from(overview.len()).unwrap_or(u16::MAX);
     let overview_area = Rect {
         x: inner.x,
@@ -1045,9 +1121,9 @@ fn render_providers_tab(f: &mut Frame, app: &mut App, area: Rect) {
     if app.providers.is_empty() {
         app.hitmap.provider_list = None;
         let hint = Paragraph::new(Line::from(vec![
-            Span::styled("No custom providers. Press ", base().fg(DIM)),
+            Span::styled(text.empty_providers_before, base().fg(DIM)),
             Span::styled("a", base().fg(C_YELLOW).add_modifier(Modifier::BOLD)),
-            Span::styled(" to add one.", base().fg(DIM)),
+            Span::styled(text.empty_providers_after, base().fg(DIM)),
         ]))
         .style(base());
         f.render_widget(hint, table_area);
@@ -1056,9 +1132,9 @@ fn render_providers_tab(f: &mut Frame, app: &mut App, area: Rect) {
 
     let header = Row::new(vec![
         Cell::from(" "),
-        Cell::from("Alias"),
-        Cell::from("Models"),
-        Cell::from("Base URL"),
+        Cell::from(text.col_alias),
+        Cell::from(text.col_models),
+        Cell::from(text.col_base_url),
     ])
     .style(base().fg(C_CYAN).add_modifier(Modifier::BOLD));
 
@@ -1124,6 +1200,24 @@ fn credits_table_text(u: &UsageInfo) -> String {
     }
 }
 
+fn subscription_text(usage: &UsageStatus) -> (String, Color) {
+    let UsageStatus::Loaded(usage) = usage else {
+        return ("--".to_string(), DIM);
+    };
+    let Some(timestamp) = usage.subscription_expires_at else {
+        return ("--".to_string(), DIM);
+    };
+    let remaining = timestamp - crate::auth::now_unix_secs();
+    let color = if remaining < 0 {
+        C_RED
+    } else if remaining < 7 * 24 * 60 * 60 {
+        C_YELLOW
+    } else {
+        C_GREEN
+    };
+    (format_subscription_date(timestamp), color)
+}
+
 /// Match `color::credits`: unlimited is green, empty balances are red, and
 /// positive balances stay neutral. Shared with the account-details popup.
 pub(super) fn credits_table_color(u: &UsageInfo) -> Color {
@@ -1151,31 +1245,31 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
         Tab::Logs => vec![
             FooterActionSpec {
                 key: "tab",
-                label: "switch tabs",
+                label: super::locale::phrase(app.language, "switch tabs"),
                 code: KeyCode::Tab,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "↑",
-                label: "up",
+                label: super::locale::phrase(app.language, "up"),
                 code: KeyCode::Up,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "↓",
-                label: "down",
+                label: super::locale::phrase(app.language, "down"),
                 code: KeyCode::Down,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "end",
-                label: "latest",
+                label: super::locale::phrase(app.language, "latest"),
                 code: KeyCode::End,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "q",
-                label: "quit",
+                label: super::locale::phrase(app.language, "quit"),
                 code: KeyCode::Char('q'),
                 enabled: true,
             },
@@ -1185,94 +1279,129 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
             vec![
                 FooterActionSpec {
                     key: "↑",
-                    label: "previous",
+                    label: super::locale::phrase(app.language, "previous"),
                     code: KeyCode::Up,
                     enabled,
                 },
                 FooterActionSpec {
                     key: "↓",
-                    label: "next",
+                    label: super::locale::phrase(app.language, "next"),
                     code: KeyCode::Down,
                     enabled,
                 },
                 FooterActionSpec {
                     key: "enter/o",
-                    label: "launch",
+                    label: super::locale::phrase(app.language, "launch"),
                     code: KeyCode::Enter,
                     enabled,
                 },
                 FooterActionSpec {
                     key: "e",
-                    label: "edit",
+                    label: super::locale::phrase(app.language, "edit"),
                     code: KeyCode::Char('e'),
                     enabled,
                 },
                 FooterActionSpec {
                     key: "a",
-                    label: "add",
+                    label: super::locale::phrase(app.language, "add"),
                     code: KeyCode::Char('a'),
                     enabled: true,
                 },
                 FooterActionSpec {
                     key: "n",
-                    label: "rename",
+                    label: super::locale::phrase(app.language, "rename"),
                     code: KeyCode::Char('n'),
                     enabled,
                 },
                 FooterActionSpec {
                     key: "d",
-                    label: "remove",
+                    label: super::locale::phrase(app.language, "remove"),
                     code: KeyCode::Char('d'),
                     enabled,
                 },
                 FooterActionSpec {
                     key: "h",
-                    label: "help",
+                    label: super::locale::phrase(app.language, "help"),
                     code: KeyCode::Char('h'),
                     enabled: true,
                 },
                 FooterActionSpec {
                     key: "q",
-                    label: "quit",
+                    label: super::locale::phrase(app.language, "quit"),
                     code: KeyCode::Char('q'),
                     enabled: true,
                 },
             ]
         }
-        Tab::Settings => vec![
+        Tab::Sync => {
+            let text = super::locale::t(app.language);
+            vec![
             FooterActionSpec {
-                key: "↑",
-                label: "previous",
-                code: KeyCode::Up,
-                enabled: true,
-            },
-            FooterActionSpec {
-                key: "↓",
-                label: "next",
+                key: "↑↓",
+                label: text.footer_choose,
                 code: KeyCode::Down,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "enter",
-                label: "edit",
+                label: text.footer_edit,
+                code: KeyCode::Enter,
+                enabled: true,
+            },
+            FooterActionSpec {
+                key: "p",
+                label: text.footer_pull,
+                code: KeyCode::Char('p'),
+                enabled: true,
+            },
+            FooterActionSpec {
+                key: "u",
+                label: text.footer_upload,
+                code: KeyCode::Char('u'),
+                enabled: true,
+            },
+            FooterActionSpec {
+                key: "q",
+                label: super::locale::phrase(app.language, "quit"),
+                code: KeyCode::Char('q'),
+                enabled: true,
+            },
+        ]
+        },
+        Tab::Settings => vec![
+            FooterActionSpec {
+                key: "↑",
+                label: super::locale::phrase(app.language, "previous"),
+                code: KeyCode::Up,
+                enabled: true,
+            },
+            FooterActionSpec {
+                key: "↓",
+                label: super::locale::phrase(app.language, "next"),
+                code: KeyCode::Down,
+                enabled: true,
+            },
+            FooterActionSpec {
+                key: "enter",
+                label: super::locale::phrase(app.language, "edit"),
                 code: KeyCode::Enter,
                 enabled: true,
             },
             FooterActionSpec {
                 key: "s",
-                label: "save",
+                label: super::locale::phrase(app.language, "save"),
                 code: KeyCode::Char('s'),
                 enabled: true,
             },
             FooterActionSpec {
                 key: "h",
-                label: "help",
+                label: super::locale::phrase(app.language, "help"),
                 code: KeyCode::Char('h'),
                 enabled: true,
             },
             FooterActionSpec {
                 key: "q",
-                label: "quit",
+                label: super::locale::phrase(app.language, "quit"),
                 code: KeyCode::Char('q'),
                 enabled: true,
             },
@@ -1284,13 +1413,13 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
                     return vec![
                         FooterActionSpec {
                             key: "↑",
-                            label: "previous",
+                            label: super::locale::phrase(app.language, "previous"),
                             code: KeyCode::Up,
                             enabled: app.view_indices.len() > 1,
                         },
                         FooterActionSpec {
                             key: "↓",
-                            label: "next",
+                            label: super::locale::phrase(app.language, "next"),
                             code: KeyCode::Down,
                             enabled: app.view_indices.len() > 1,
                         },
@@ -1298,7 +1427,7 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
                 }
                 vec![FooterActionSpec {
                     key,
-                    label: short_label(label),
+                    label: super::locale::phrase(app.language, short_label(label)),
                     code: account_footer_code(key),
                     enabled: account_footer_enabled(app, key),
                 }]
@@ -1310,13 +1439,14 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
 fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
     // Rename input takes top priority
     if app.rename.is_some() {
+        let text = super::locale::t(app.language);
         let input = app.rename.as_ref().expect("rename").input.clone();
-        let shown = format!(" Rename: {input}#  (Enter confirm / Esc cancel)");
+        let shown = format!("{}{input}#{}", text.rename_prefix, text.rename_suffix);
         let line = Line::from(vec![
-            Span::styled(" Rename: ", base().fg(C_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(text.rename_prefix, base().fg(C_CYAN).add_modifier(Modifier::BOLD)),
             Span::styled(input, base().fg(C_WHITE).add_modifier(Modifier::BOLD)),
             Span::styled("#", base().fg(C_GRAY)),
-            Span::styled("  (Enter confirm / Esc cancel)", base().fg(DIM)),
+            Span::styled(text.rename_suffix, base().fg(DIM)),
         ]);
         f.render_widget(Paragraph::new(line).style(base()), area);
         app.hitmap.overlay_panel = Some(area);
@@ -1442,9 +1572,14 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
         ));
         f.render_widget(Paragraph::new(msg).style(base()), area);
     } else if !app.marked.is_empty() {
-        let prefix = format!(" {} selected \u{2014} ", app.marked.len());
-        let enter_label = "for batch";
-        let esc_label = "to clear";
+        let text = super::locale::t(app.language);
+        let prefix = format!(
+            " {} {} \u{2014} ",
+            app.marked.len(),
+            super::locale::phrase(app.language, "marked")
+        );
+        let enter_label = text.selected_for_batch;
+        let esc_label = text.selected_clear;
         let enter_x = prefix.chars().count();
         let esc_x = enter_x + "enter".chars().count() + 1 + enter_label.chars().count() + 3;
         let line = Line::from(vec![
@@ -1886,7 +2021,7 @@ fn usage_pct_style(remaining_pct_str: &str, is_selected: bool) -> Style {
 }
 
 /// Compress verbose keymap labels for status bar.
-fn short_label(label: &str) -> &str {
+fn short_label(label: &'static str) -> &'static str {
     match label {
         "move selection" => "nav",
         "search" => "search",

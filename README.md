@@ -64,6 +64,15 @@ codex-switch launch       # start Codex with the best account
 - Direct `self-update` verifies both SHA-256 and GitHub build provenance with `gh attestation verify`; install a current [GitHub CLI](https://cli.github.com/) before using it.
 - Runs on macOS, Linux, and Windows.
 
+## Fork additions
+
+This fork keeps the upstream account manager and adds:
+
+- **Account sync.** The TUI Sync tab stores this computer's saved ChatGPT accounts in Redis. The group name defaults to the computer name and can be changed; pushing replaces the remote group of the same name, and pulling updates local profiles of that name. `redis://`, Upstash `rediss://`, and Upstash `https://` REST addresses are accepted. The upload includes each profile's `auth.json`, so keep the Redis instance private.
+- **Language.** Settings defaults to English and can switch the interface to Chinese.
+- **Subscription expiry.** The Accounts table has an Expires column from `GET /backend-api/subscriptions` (`active_until`). Refresh the row to load it. Quota windows are unchanged.
+- **Auto warmup.** Settings can warm an account one minute after its 5-hour or 7-day window resets. This runs only while the TUI is open.
+
 > **Upgrading from a `0.0.x` install?** This release line intentionally breaks two conventions: versions are now calendar-based (`YYYYMMDD.N.0`, so updates sort and read by date), and Unix installs moved from `/usr/local/bin` to the user-owned `$HOME/.local/bin` so `self-update` never needs `sudo`. A normal `self-update` or one installer rerun migrates you; profiles and configuration are preserved. All breaking changes and reasons: [Updating](https://github.com/xjoker/codex-switch/wiki/Updating).
 
 > **Upgrading from a release with the old daemon?** The daemon was removed. When the old LaunchAgent, systemd unit, or Windows scheduled task (or an old `self-update`) starts the new binary as a daemon, it removes that registration and exits instead of failing on every launch; `codex-switch daemon uninstall` does the same on demand. Obsolete `[daemon]` settings such as `cache_refresh_interval_secs` and `auto_warmup` can be deleted. See [Updating](https://github.com/xjoker/codex-switch/wiki/Updating#migrate-from-the-removed-daemon).
