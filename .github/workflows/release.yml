@@ -5,6 +5,7 @@ on:
     tags:
       - "v*"
       - "dev"
+  workflow_dispatch:
 
 permissions:
   contents: read
