@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v20261114.1.0 — 2026-11-14
+
+Fork release. Upstream behavior from v20261001.5.0 is unchanged except for the additions below.
+
+- **Account sync** — The TUI Sync tab uploads and downloads saved ChatGPT profiles through Redis, including Upstash `rediss://` and REST addresses. The group name defaults to the computer name.
+- **Language** — Settings defaults to English and can switch the interface to Chinese.
+- **Subscription expiry** — The Accounts table shows `active_until` from the ChatGPT subscriptions endpoint.
+- **Auto warmup** — While the TUI is open, an account can be warmed one minute after its 5-hour or 7-day window resets.
+
 ## v20261001.5.0 — 2026-10-01
 
 Stable release candidate covering every development build since v20260804.1.0. Read the upgrade notes first: this release removes the background daemon.
