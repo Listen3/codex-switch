@@ -116,7 +116,7 @@ pub enum ProviderCommand {
     version = concat!(env!("CARGO_PKG_VERSION"), "\n", env!("CARGO_PKG_REPOSITORY")),
     about = "Codex account switcher -- multi-profile manager with usage dashboard\nhttps://github.com/Listen3/codex-switch",
     long_about = None,
-    after_help = "Examples:\n  codex-switch list\n  codex-switch use\n  codex-switch rename old-alias new-alias\n  codex-switch import ./auth-backups\n  codex-switch self-update --check\n\nRun `codex-switch <command> --help` for command-specific options."
+    after_help = "Examples:\n  codex-switch                 # open the TUI\n  codex-switch list\n  codex-switch use\n  codex-switch rename old-alias new-alias\n  codex-switch import ./auth-backups\n  codex-switch self-update --check\n\nRun `codex-switch <command> --help` for command-specific options."
 )]
 pub struct Cli {
     /// Output as compact JSON (supported by list, use, launch, warmup, reset-card, rename, delete, login, import, self-update, doctor, provider add/list/show/rename/remove/fetch-models/probe)
@@ -273,7 +273,7 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Launch the interactive TUI
+    /// Launch the interactive TUI. This is also the default when no command is given.
     Tui,
     /// Open the codex-switch data directory (~/.codex-switch, or $CODEX_SWITCH_HOME) in the system file manager
     Open,
@@ -431,6 +431,19 @@ fn global_value_flag(name: &str) -> bool {
     matches!(name, "proxy" | "color")
 }
 
+/// `codex-switch` with no subcommand opens the TUI. `tui` remains a command.
+pub(crate) fn default_tui_when_no_command(mut argv: Vec<String>) -> Vec<String> {
+    let asks_for_help = argv.iter().any(|arg| {
+        matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V" | "help")
+            || arg.starts_with("--help=")
+    });
+    if asks_for_help || argv.iter().any(|arg| arg == "--") || first_subcommand(&argv).is_some() {
+        return argv;
+    }
+    argv.push("tui".to_string());
+    argv
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,6 +451,23 @@ mod tests {
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn no_command_defaults_to_tui_and_explicit_commands_stay() {
+        let bare = default_tui_when_no_command(argv(&["codex-switch"]));
+        let parsed = Cli::try_parse_from(&bare).expect("bare command opens the TUI");
+        assert!(matches!(parsed.command, Commands::Tui));
+
+        let with_flags = default_tui_when_no_command(argv(&["codex-switch", "--debug"]));
+        let parsed = Cli::try_parse_from(&with_flags).expect("flags before the default TUI");
+        assert!(parsed.debug);
+        assert!(matches!(parsed.command, Commands::Tui));
+
+        let listed = default_tui_when_no_command(argv(&["codex-switch", "list"]));
+        assert_eq!(listed, argv(&["codex-switch", "list"]));
+        let help = default_tui_when_no_command(argv(&["codex-switch", "--help"]));
+        assert_eq!(help, argv(&["codex-switch", "--help"]));
     }
 
     #[test]

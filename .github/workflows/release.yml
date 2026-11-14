@@ -375,6 +375,7 @@ jobs:
             - **Language.** Settings defaults to English and can switch the interface to Chinese.
             - **Subscription expiry.** The Accounts table shows `active_until` from the ChatGPT subscriptions endpoint after a refresh.
             - **Auto warmup.** While the TUI is open, an account can be warmed one minute after its 5-hour or 7-day window resets.
+            - **Open the TUI.** `codex-switch` with no command opens the dashboard. `codex-switch tui` still works.
 
             ## Quick install
 

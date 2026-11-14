@@ -34,7 +34,7 @@ Homebrew 用户：`brew install xjoker/tap/codex-switch`。
 
 ```bash
 codex-switch login        # 无浏览器服务器加 --device
-codex-switch tui          # 交互式仪表盘
+codex-switch              # 交互式仪表盘（`tui` 仍然可用）
 codex-switch use          # 自动选择并切换到最佳账号
 codex-switch launch       # 用最佳账号启动 Codex
 ```

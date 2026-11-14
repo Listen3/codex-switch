@@ -30,7 +30,7 @@ irm https://github.com/xjoker/codex-switch/releases/latest/download/install.ps1 
 
 ```bash
 codex-switch login work    # 别名可省略，之后可 rename
-codex-switch tui
+codex-switch               # 打开界面，不必再加 tui
 ```
 
 无浏览器服务器使用 `codex-switch login --device`。
@@ -143,7 +143,7 @@ TUI 启动的额外 argv 支持带引号参数（如 `--cd "D:\My Work"`）或 J
 
 ## TUI 操作说明
 
-运行 `codex-switch tui`。四页：**Accounts**（ChatGPT 额度与选号）、**Providers**（自定义提供方）、**Settings**（编辑 `config.toml`）与 **Logs**（本次会话诊断）。`Tab` / `Shift+Tab` 循环切换；`h` 帮助；`q` 退出。设置未保存时，退出前会要求确认。TUI 内按 `h` 看到的快捷键表与代码同源，以当前版本为准。鼠标可点 Tab、列表行、Settings 字段、提供方表单、启动选择器和确认框的 `y`/`n`；这些弹层不会点到背后的页面。
+运行 `codex-switch`（`codex-switch tui` 同样打开）。四页：**Accounts**（ChatGPT 额度与选号）、**Providers**（自定义提供方）、**Settings**（编辑 `config.toml`）与 **Logs**（本次会话诊断）。`Tab` / `Shift+Tab` 循环切换；`h` 帮助；`q` 退出。设置未保存时，退出前会要求确认。TUI 内按 `h` 看到的快捷键表与代码同源，以当前版本为准。鼠标可点 Tab、列表行、Settings 字段、提供方表单、启动选择器和确认框的 `y`/`n`；这些弹层不会点到背后的页面。
 
 设置 `NO_COLOR` 时，**CLI** 仍遵守无颜色；**TUI** 仍使用设计好的深色配色，避免浅色终端把按键提示洗成黑字。
 

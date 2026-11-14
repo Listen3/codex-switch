@@ -34,7 +34,7 @@ Then add an account and open the dashboard:
 
 ```bash
 codex-switch login        # use --device on a headless machine
-codex-switch tui          # interactive dashboard
+codex-switch              # interactive dashboard (`tui` still works)
 codex-switch use          # switch to the best eligible account
 codex-switch launch       # start Codex with the best account
 ```

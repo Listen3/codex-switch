@@ -45,6 +45,7 @@ fn read_last_refresh(path: Result<std::path::PathBuf>) -> Option<String> {
 pub async fn run_cli() {
     let raw: Vec<String> = std::env::args().collect();
     let (clap_argv, launch_passthrough) = extract_launch_passthrough(&raw);
+    let clap_argv = crate::cli::default_tui_when_no_command(clap_argv);
     let cli = Cli::parse_from(&clap_argv);
     // Handle the removed daemon before configuration loads: an old service
     // must be cleaned up even when config.toml still has obsolete content.
