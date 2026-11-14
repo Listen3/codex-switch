@@ -3,15 +3,15 @@ set -euo pipefail
 
 # codex-switch installer / uninstaller for macOS and Linux
 # Usage:
-#   curl -fsSL https://github.com/xjoker/codex-switch/releases/latest/download/install.sh | bash
-#   curl -fsSL https://github.com/xjoker/codex-switch/releases/download/dev/install.sh | bash -s -- --dev
+#   curl -fsSL https://github.com/Listen3/codex-switch/releases/latest/download/install.sh | bash
+#   curl -fsSL https://github.com/Listen3/codex-switch/releases/download/dev/install.sh | bash -s -- --dev
 #   curl -fsSL .../install.sh | bash -s -- --system       # install system-wide (may require sudo)
 #   curl -fsSL .../install.sh | bash -s -- --uninstall    # uninstall codex-switch
 #   CS_VERSION=20260712.1.0 curl -fsSL .../install.sh | bash  # install specific version
 
-REPO="xjoker/codex-switch"
+REPO="Listen3/codex-switch"
 PROVENANCE_ASSET="codex-switch-build-provenance.json"
-RELEASE_WORKFLOW="xjoker/codex-switch/.github/workflows/release.yml"
+RELEASE_WORKFLOW="Listen3/codex-switch/.github/workflows/release.yml"
 USER_INSTALL_DIR="${HOME}/.local/bin"
 SYSTEM_INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="codex-switch"

@@ -1,14 +1,14 @@
 # codex-switch installer / uninstaller for Windows
 # Usage:
-#   irm https://github.com/xjoker/codex-switch/releases/latest/download/install.ps1 | iex
-#   $env:CS_DEV="1"; irm https://github.com/xjoker/codex-switch/releases/download/dev/install.ps1 | iex
+#   irm https://github.com/Listen3/codex-switch/releases/latest/download/install.ps1 | iex
+#   $env:CS_DEV="1"; irm https://github.com/Listen3/codex-switch/releases/download/dev/install.ps1 | iex
 #   $env:CS_VERSION="20260712.1.0"; irm .../install.ps1 | iex # install specific version
 #   $env:CS_UNINSTALL="1"; irm .../install.ps1 | iex         # uninstall codex-switch
 
 $ErrorActionPreference = "Stop"
-$Repo = "xjoker/codex-switch"
+$Repo = "Listen3/codex-switch"
 $ProvenanceAsset = "codex-switch-build-provenance.json"
-$ReleaseWorkflow = "xjoker/codex-switch/.github/workflows/release.yml"
+$ReleaseWorkflow = "Listen3/codex-switch/.github/workflows/release.yml"
 $BinaryName = "codex-switch.exe"
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\codex-switch"
 $DataDir = Join-Path $env:USERPROFILE ".codex-switch"

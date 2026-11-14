@@ -9,11 +9,11 @@ use sha2::{Digest, Sha256};
 
 use crate::http_retry::{self, ReplaySafety};
 
-const REPO_OWNER: &str = "xjoker";
+const REPO_OWNER: &str = "Listen3";
 const REPO_NAME: &str = "codex-switch";
 const BIN_NAME: &str = "codex-switch";
 const PROVENANCE_ASSET_NAME: &str = "codex-switch-build-provenance.json";
-const RELEASE_WORKFLOW: &str = "xjoker/codex-switch/.github/workflows/release.yml";
+const RELEASE_WORKFLOW: &str = "Listen3/codex-switch/.github/workflows/release.yml";
 const SYSTEM_INSTALL_DIR: &str = "/usr/local/bin";
 const SYSTEM_INSTALL_MARKER_NAME: &str = ".codex-switch-system-install-v1";
 const UPDATE_TTL_SECS: i64 = 12 * 60 * 60;
@@ -168,7 +168,7 @@ fn replacement_permission_hint(
 }
 
 pub(crate) fn homebrew_dev_install_hint() -> &'static str {
-    "run `brew uninstall codex-switch`, then follow the development-release instructions at https://github.com/xjoker/codex-switch/wiki/Development-Releases#install-the-rolling-dev-build"
+    "run `brew uninstall codex-switch`, then follow the development-release instructions at https://github.com/Listen3/codex-switch/wiki/Development-Releases#install-the-rolling-dev-build"
 }
 
 fn homebrew_dev_install_error() -> String {
@@ -207,7 +207,7 @@ impl InstallSource {
 
     pub fn upgrade_hint(self) -> &'static str {
         match self {
-            InstallSource::Homebrew => "brew upgrade xjoker/tap/codex-switch",
+            InstallSource::Homebrew => "brew upgrade Listen3/tap/codex-switch",
             InstallSource::Direct => "codex-switch self-update",
         }
     }
@@ -1056,9 +1056,9 @@ mod tests {
                 "--bundle",
                 "/tmp/codex-switch-build-provenance.json",
                 "--repo",
-                "xjoker/codex-switch",
+                "Listen3/codex-switch",
                 "--signer-workflow",
-                "xjoker/codex-switch/.github/workflows/release.yml",
+                "Listen3/codex-switch/.github/workflows/release.yml",
                 "--source-ref",
                 "refs/tags/v20260729.2.0",
                 "--source-digest",
@@ -1115,11 +1115,11 @@ mod tests {
     fn release_api_url_uses_latest_or_tag_endpoint() {
         assert_eq!(
             release_api_url(None),
-            "https://api.github.com/repos/xjoker/codex-switch/releases/latest"
+            "https://api.github.com/repos/Listen3/codex-switch/releases/latest"
         );
         assert_eq!(
             release_api_url(Some("0.1.0")),
-            "https://api.github.com/repos/xjoker/codex-switch/releases/tags/v0.1.0"
+            "https://api.github.com/repos/Listen3/codex-switch/releases/tags/v0.1.0"
         );
     }
 
@@ -1137,7 +1137,7 @@ mod tests {
             "path traversal survived encoding: {url}"
         );
         assert!(
-            url.starts_with("https://api.github.com/repos/xjoker/codex-switch/releases/tags/"),
+            url.starts_with("https://api.github.com/repos/Listen3/codex-switch/releases/tags/"),
             "the request must stay inside this repository: {url}"
         );
     }
@@ -1176,7 +1176,7 @@ mod tests {
     fn release_api_url_dev_uses_dev_tag() {
         assert_eq!(
             release_api_url(Some("dev")),
-            "https://api.github.com/repos/xjoker/codex-switch/releases/tags/dev"
+            "https://api.github.com/repos/Listen3/codex-switch/releases/tags/dev"
         );
     }
 
@@ -1184,11 +1184,11 @@ mod tests {
     fn tag_ref_api_url_uses_the_exact_release_tag() {
         assert_eq!(
             tag_ref_api_url("dev"),
-            "https://api.github.com/repos/xjoker/codex-switch/git/ref/tags/dev"
+            "https://api.github.com/repos/Listen3/codex-switch/git/ref/tags/dev"
         );
         assert_eq!(
             tag_ref_api_url("release/candidate"),
-            "https://api.github.com/repos/xjoker/codex-switch/git/ref/tags/release%2Fcandidate"
+            "https://api.github.com/repos/Listen3/codex-switch/git/ref/tags/release%2Fcandidate"
         );
     }
 
@@ -1244,7 +1244,7 @@ mod tests {
         let hint = super::homebrew_dev_install_hint();
         assert!(hint.contains("brew uninstall codex-switch"));
         assert!(hint.contains(
-            "github.com/xjoker/codex-switch/wiki/Development-Releases#install-the-rolling-dev-build"
+            "github.com/Listen3/codex-switch/wiki/Development-Releases#install-the-rolling-dev-build"
         ));
         assert!(
             !hint.contains("blob/master/"),

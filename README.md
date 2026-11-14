@@ -17,13 +17,13 @@ cli_auth_credentials_store = "file"
 Install the stable release — macOS / Linux:
 
 ```bash
-curl -fsSL https://github.com/xjoker/codex-switch/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/Listen3/codex-switch/releases/latest/download/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://github.com/xjoker/codex-switch/releases/latest/download/install.ps1 | iex
+irm https://github.com/Listen3/codex-switch/releases/latest/download/install.ps1 | iex
 ```
 
 Homebrew users: `brew install xjoker/tap/codex-switch`.
@@ -60,7 +60,7 @@ codex-switch launch       # start Codex with the best account
 - Selects an eligible account with adaptive, pace-aware scoring, and launches Codex with it.
 - After a switch (`use`, TUI `u`, or a `login` that activates credentials), restarts a running Codex app-server daemon (Codex 0.157+) with `codex app-server daemon restart` so new sessions use the selected account; disable with `[use] restart_app_server = false`. ChatGPT `launch` passes `--no-daemon` instead when Codex supports it.
 - Supports reset cards, one-time quota warmup (`warmup`), forced usage refresh (`list -f`), JSON output, and proxies. On the TUI Accounts page, `u` (when no accounts are marked) switches the selected account and shows progress, `t` enables session-only auto-refresh, and the account menu's `w` performs a one-time warmup; it does not run a resident service.
-- Refreshes expiring tokens and updates direct installs: `self-update`, `self-update --stable`, `self-update --version <VERSION>`, or the rolling dev channel via `self-update --dev` — new dev installs use [install.sh](https://github.com/xjoker/codex-switch/releases/download/dev/install.sh) / [install.ps1](https://github.com/xjoker/codex-switch/releases/download/dev/install.ps1) from the `dev` release.
+- Refreshes expiring tokens and updates direct installs: `self-update`, `self-update --stable`, `self-update --version <VERSION>`, or the rolling dev channel via `self-update --dev` — new dev installs use [install.sh](https://github.com/Listen3/codex-switch/releases/download/dev/install.sh) / [install.ps1](https://github.com/Listen3/codex-switch/releases/download/dev/install.ps1) from the `dev` release.
 - Direct `self-update` verifies both SHA-256 and GitHub build provenance with `gh attestation verify`; install a current [GitHub CLI](https://cli.github.com/) before using it.
 - Runs on macOS, Linux, and Windows.
 

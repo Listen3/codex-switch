@@ -289,25 +289,25 @@ jobs:
           ### Stable: macOS / Linux
 
           ```bash
-          curl -fsSL https://github.com/xjoker/codex-switch/releases/latest/download/install.sh | bash
+          curl -fsSL https://github.com/Listen3/codex-switch/releases/latest/download/install.sh | bash
           ```
 
           ### Stable: Windows PowerShell
 
           ```powershell
-          irm https://github.com/xjoker/codex-switch/releases/latest/download/install.ps1 | iex
+          irm https://github.com/Listen3/codex-switch/releases/latest/download/install.ps1 | iex
           ```
 
           ### Rolling dev: macOS / Linux
 
           ```bash
-          curl -fsSL https://github.com/xjoker/codex-switch/releases/download/dev/install.sh | bash -s -- --dev
+          curl -fsSL https://github.com/Listen3/codex-switch/releases/download/dev/install.sh | bash -s -- --dev
           ```
 
           ### Rolling dev: Windows PowerShell
 
           ```powershell
-          $env:CS_DEV="1"; irm https://github.com/xjoker/codex-switch/releases/download/dev/install.ps1 | iex
+          $env:CS_DEV="1"; irm https://github.com/Listen3/codex-switch/releases/download/dev/install.ps1 | iex
           ```
 
           ### Manual Download
@@ -331,7 +331,7 @@ jobs:
 
           **Older macOS/Linux direct install in \`/usr/local/bin\`:** migrate once with the matching user-level installer. It verifies the download, requests \`sudo\` once, installs to \`~/.local/bin\`, removes the old binary, and preserves profiles and configuration.
 
-          \`curl -fsSL https://github.com/xjoker/codex-switch/releases/download/dev/install.sh | bash -s -- --dev\`
+          \`curl -fsSL https://github.com/Listen3/codex-switch/releases/download/dev/install.sh | bash -s -- --dev\`
 
           Version: \`${RELEASE_VERSION}\`
           EOF
@@ -360,11 +360,28 @@ jobs:
           name: v${{ needs.meta.outputs.version }}
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
           overwrite_files: true
-          generate_release_notes: true
           body: |
-            **Older macOS/Linux direct install in `/usr/local/bin`:** migrate once with the matching user-level installer. It verifies the download, requests `sudo` once, installs to `~/.local/bin`, removes the old binary, and preserves profiles and configuration.
+            Fork release of codex-switch. Upstream v20261001.5.0 behavior is kept, with these additions:
 
-            `curl -fsSL https://github.com/xjoker/codex-switch/releases/download/v${{ needs.meta.outputs.version }}/install.sh | bash`
+            - **Account sync.** The TUI Sync tab stores this computer's saved ChatGPT accounts in Redis or Upstash. The group name defaults to the computer name. Push replaces the remote group of the same name; pull updates the local profiles. The upload includes `auth.json`.
+            - **Language.** Settings defaults to English and can switch the interface to Chinese.
+            - **Subscription expiry.** The Accounts table shows `active_until` from the ChatGPT subscriptions endpoint after a refresh.
+            - **Auto warmup.** While the TUI is open, an account can be warmed one minute after its 5-hour or 7-day window resets.
+
+            ## Quick install
+
+            macOS / Linux:
+
+            ```bash
+            curl -fsSL https://github.com/Listen3/codex-switch/releases/download/v${{ needs.meta.outputs.version }}/install.sh | bash
+            ```
+
+            Windows PowerShell:
+
+            ```powershell
+            irm https://github.com/Listen3/codex-switch/releases/download/v${{ needs.meta.outputs.version }}/install.ps1 | iex
+            ```
+          generate_release_notes: false
           files: |
             artifacts/*
         env:
@@ -372,7 +389,7 @@ jobs:
 
   legacy-upgrade:
     needs: [meta, build, attest]
-    if: needs.meta.outputs.is_dev == 'true' || needs.meta.outputs.prerelease == 'false'
+    if: github.repository_owner == 'xjoker' && (needs.meta.outputs.is_dev == 'true' || needs.meta.outputs.prerelease == 'false')
     strategy:
       fail-fast: false
       matrix:
@@ -412,7 +429,7 @@ jobs:
 
   homebrew:
     needs: [meta, release]
-    if: needs.meta.outputs.prerelease == 'false'
+    if: needs.meta.outputs.prerelease == 'false' && github.repository_owner == 'xjoker'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.meta.outputs.version }}
@@ -452,7 +469,7 @@ jobs:
       - name: Generate formula
         run: |
           VERSION="$RELEASE_VERSION"
-          BASE="https://github.com/xjoker/codex-switch/releases/download/v${VERSION}"
+          BASE="https://github.com/Listen3/codex-switch/releases/download/v${VERSION}"
 
           # Generate latest formula (codex-switch.rb)
           cat > codex-switch.rb << RUBY

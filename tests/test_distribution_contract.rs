@@ -1008,11 +1008,11 @@ fn dev_release_uses_the_short_calendar_prerelease_version() {
 
 #[test]
 fn installer_instructions_use_channel_matched_release_assets() {
-    let stable_unix = "https://github.com/xjoker/codex-switch/releases/latest/download/install.sh";
+    let stable_unix = "https://github.com/Listen3/codex-switch/releases/latest/download/install.sh";
     let stable_windows =
-        "https://github.com/xjoker/codex-switch/releases/latest/download/install.ps1";
-    let dev_unix = "https://github.com/xjoker/codex-switch/releases/download/dev/install.sh";
-    let dev_windows = "https://github.com/xjoker/codex-switch/releases/download/dev/install.ps1";
+        "https://github.com/Listen3/codex-switch/releases/latest/download/install.ps1";
+    let dev_unix = "https://github.com/Listen3/codex-switch/releases/download/dev/install.sh";
+    let dev_windows = "https://github.com/Listen3/codex-switch/releases/download/dev/install.ps1";
 
     for path in [
         "README.md",
