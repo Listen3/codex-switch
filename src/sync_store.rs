@@ -1,5 +1,6 @@
-//! Local sync settings and one named group of custom API providers.
+//! Local sync settings and named groups of saved ChatGPT accounts.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
@@ -39,7 +40,7 @@ struct ProviderSnapshot {
     api_key: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct AccountSnapshot {
     alias: String,
     auth: serde_json::Value,
@@ -119,64 +120,277 @@ pub fn save(settings: &SyncSettings) -> Result<()> {
     Ok(())
 }
 
+pub const GROUP_KEY_PREFIX: &str = "cs:v1:group/";
+
 pub fn group_key(group_name: &str) -> String {
-    format!("cs:v1:group/{group_name}")
+    format!("{GROUP_KEY_PREFIX}{group_name}")
 }
 
-pub async fn push(settings: &SyncSettings, language: crate::config::Language) -> Result<String> {
+pub fn account_group(alias: &str, default_group: &str) -> String {
+    let index = read_index().unwrap_or_default();
+    group_for(alias, &index, default_group)
+}
+
+pub fn local_group_names(default_group: &str) -> Result<Vec<String>> {
+    let aliases = crate::profile::list_profiles()?;
+    let index = read_index().unwrap_or_default();
+    let mut names = BTreeSet::new();
+    names.insert(default_group.to_string());
+    for alias in aliases {
+        names.insert(group_for(&alias, &index, default_group));
+    }
+    let mut ordered: Vec<String> = names.into_iter().filter(|name| name != default_group).collect();
+    ordered.insert(0, default_group.to_string());
+    Ok(ordered)
+}
+
+pub fn remote_groups_to_remove(remote: &[String], keep: &[String]) -> Vec<String> {
+    let keep: BTreeSet<&str> = keep.iter().map(String::as_str).collect();
+    remote
+        .iter()
+        .filter(|name| !keep.contains(name.as_str()))
+        .cloned()
+        .collect()
+}
+
+pub fn group_name_from_key(key: &str) -> Option<String> {
+    let name = key.strip_prefix(GROUP_KEY_PREFIX)?.trim();
+    crate::profile::validate_alias(name).ok()?;
+    Some(name.to_string())
+}
+
+pub fn rename_group(from: &str, to: &str) -> Result<()> {
+    if from == to {
+        return Ok(());
+    }
+    crate::profile::validate_alias(from)?;
+    crate::profile::validate_alias(to)?;
+    let mut index = read_index().unwrap_or_default();
+    for alias in crate::profile::list_profiles()? {
+        if group_for(&alias, &index, from) == from {
+            index.accounts.insert(alias, to.to_string());
+        }
+    }
+    write_index(&index)
+}
+
+pub async fn list_remote_groups(settings: &SyncSettings) -> Result<Vec<String>> {
     let endpoint = remote_store::parse(&settings.redis_url, &settings.password)?;
-    let document = GroupDocument {
-        schema: 2,
-        group: settings.group_name.clone(),
-        accounts: local_accounts()?,
-        providers: local_providers()?,
-    };
-    let body = serde_json::to_string(&document).context("serializing group")?;
-    remote_store::set_text(&endpoint, &group_key(&settings.group_name), &body).await?;
-    Ok(crate::tui::locale::pushed(
+    let keys = remote_store::list_text(&endpoint, &format!("{GROUP_KEY_PREFIX}*")).await?;
+    let mut names = Vec::new();
+    for key in keys {
+        if let Some(name) = group_name_from_key(&key) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+pub async fn push_groups(
+    settings: &SyncSettings,
+    language: crate::config::Language,
+    groups: &[String],
+    replace_remote: bool,
+) -> Result<String> {
+    let endpoint = remote_store::parse(&settings.redis_url, &settings.password)?;
+    let mut account_count = 0_usize;
+    for group in groups {
+        crate::profile::validate_alias(group)?;
+        let document = document_for(group, &settings.group_name)?;
+        account_count += document.accounts.len();
+        let body = serde_json::to_string(&document).context("serializing group")?;
+        remote_store::set_text(&endpoint, &group_key(group), &body).await?;
+    }
+    let mut removed = 0_usize;
+    if replace_remote {
+        let remote = list_remote_groups(settings).await?;
+        for name in remote_groups_to_remove(&remote, groups) {
+            remote_store::delete_text(&endpoint, &group_key(&name)).await?;
+            removed += 1;
+        }
+    }
+    Ok(crate::tui::locale::uploaded(
         language,
-        &settings.group_name,
-        document.accounts.len(),
+        groups.len(),
+        account_count,
+        removed,
     ))
 }
 
-pub async fn pull(settings: &SyncSettings, language: crate::config::Language) -> Result<String> {
+pub async fn pull_groups(
+    settings: &SyncSettings,
+    language: crate::config::Language,
+    groups: &[String],
+) -> Result<String> {
     let endpoint = remote_store::parse(&settings.redis_url, &settings.password)?;
-    let Some(body) = remote_store::get_text(&endpoint, &group_key(&settings.group_name)).await?
-    else {
-        anyhow::bail!(crate::tui::locale::missing_group(
-            language,
-            &settings.group_name
-        ));
-    };
-    let document: GroupDocument = serde_json::from_str(&body).context("unrecognized group document")?;
-    if document.schema != 1 && document.schema != 2 {
-        anyhow::bail!(crate::tui::locale::unknown_schema(language, document.schema));
-    }
     let mut created = 0_usize;
     let mut updated = 0_usize;
+    let mut removed = 0_usize;
     let mut skipped = 0_usize;
-    for snapshot in document.accounts {
-        match apply_account(snapshot) {
-            Ok(true) => created += 1,
-            Ok(false) => updated += 1,
-            Err(_) => skipped += 1,
+    let mut found = 0_usize;
+    for group in groups {
+        crate::profile::validate_alias(group)?;
+        let Some(body) = remote_store::get_text(&endpoint, &group_key(group)).await? else {
+            continue;
+        };
+        let document: GroupDocument =
+            serde_json::from_str(&body).context("unrecognized group document")?;
+        if document.schema != 1 && document.schema != 2 {
+            anyhow::bail!(crate::tui::locale::unknown_schema(language, document.schema));
         }
+        let counts = replace_local_group(group, &settings.group_name, &document)?;
+        created += counts.created;
+        updated += counts.updated;
+        removed += counts.removed;
+        skipped += counts.skipped;
+        found += 1;
     }
-    for snapshot in document.providers {
-        match apply_provider(snapshot, language) {
-            Ok(true) => created += 1,
-            Ok(false) => updated += 1,
-            Err(_) => skipped += 1,
-        }
+    if found == 0 {
+        anyhow::bail!(crate::tui::locale::no_remote_groups(language));
     }
-    Ok(crate::tui::locale::pulled(
+    Ok(crate::tui::locale::downloaded(
         language,
-        &settings.group_name,
+        found,
         created,
         updated,
+        removed,
         skipped,
     ))
+}
+
+struct ApplyCounts {
+    created: usize,
+    updated: usize,
+    removed: usize,
+    skipped: usize,
+}
+
+fn replace_local_group(
+    group: &str,
+    default_group: &str,
+    document: &GroupDocument,
+) -> Result<ApplyCounts> {
+    let mut index = read_index().unwrap_or_default();
+    let existing = aliases_in_group(group, default_group, &index)?;
+    let mut incoming = BTreeSet::new();
+    let mut counts = ApplyCounts {
+        created: 0,
+        updated: 0,
+        removed: 0,
+        skipped: 0,
+    };
+    for snapshot in &document.accounts {
+        incoming.insert(snapshot.alias.clone());
+        match apply_account(snapshot.clone()) {
+            Ok(true) => {
+                counts.created += 1;
+                index.accounts.insert(snapshot.alias.clone(), group.to_string());
+            }
+            Ok(false) => {
+                counts.updated += 1;
+                index.accounts.insert(snapshot.alias.clone(), group.to_string());
+            }
+            Err(_) => counts.skipped += 1,
+        }
+    }
+    for snapshot in &document.providers {
+        match apply_provider(snapshot.clone(), crate::config::Language::En) {
+            Ok(true) => counts.created += 1,
+            Ok(false) => counts.updated += 1,
+            Err(_) => counts.skipped += 1,
+        }
+    }
+    for alias in existing {
+        if incoming.contains(&alias) {
+            continue;
+        }
+        if crate::profile::read_current() == alias {
+            counts.skipped += 1;
+            continue;
+        }
+        if crate::profile::cmd_delete(&alias).is_err() {
+            counts.skipped += 1;
+            continue;
+        }
+        index.accounts.remove(&alias);
+        counts.removed += 1;
+    }
+    write_index(&index)?;
+    Ok(counts)
+}
+
+fn document_for(group: &str, default_group: &str) -> Result<GroupDocument> {
+    Ok(GroupDocument {
+        schema: 2,
+        group: group.to_string(),
+        accounts: accounts_in_group(group, default_group)?,
+        providers: if group == default_group {
+            local_providers()?
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn aliases_in_group(group: &str, default_group: &str, index: &GroupIndex) -> Result<Vec<String>> {
+    let mut aliases = Vec::new();
+    for alias in crate::profile::list_profiles()? {
+        if group_for(&alias, index, default_group) == group {
+            aliases.push(alias);
+        }
+    }
+    Ok(aliases)
+}
+
+fn accounts_in_group(group: &str, default_group: &str) -> Result<Vec<AccountSnapshot>> {
+    let index = read_index().unwrap_or_default();
+    let mut snapshots = Vec::new();
+    for alias in aliases_in_group(group, default_group, &index)? {
+        let path = crate::profile::profile_auth_path(&alias)?;
+        let auth = crate::auth::read_auth(&path)?;
+        snapshots.push(AccountSnapshot { alias, auth });
+    }
+    Ok(snapshots)
+}
+
+fn group_for(alias: &str, index: &GroupIndex, default_group: &str) -> String {
+    index
+        .accounts
+        .get(alias)
+        .filter(|name| crate::profile::validate_alias(name).is_ok())
+        .cloned()
+        .unwrap_or_else(|| default_group.to_string())
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+struct GroupIndex {
+    #[serde(default)]
+    accounts: BTreeMap<String, String>,
+}
+
+fn read_index() -> Result<GroupIndex> {
+    let path = index_path()?;
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    serde_json::from_str(&raw).context("parsing sync groups")
+}
+
+fn write_index(index: &GroupIndex) -> Result<()> {
+    let path = index_path()?;
+    let mut pruned = index.clone();
+    if let Ok(aliases) = crate::profile::list_profiles() {
+        let live: BTreeSet<String> = aliases.into_iter().collect();
+        pruned.accounts.retain(|alias, _| live.contains(alias));
+    }
+    let body = serde_json::to_string_pretty(&pruned).context("serializing sync groups")?;
+    crate::auth::atomic_write_private(&path, body.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+fn index_path() -> Result<PathBuf> {
+    Ok(crate::auth::app_home()?.join("sync-groups.json"))
 }
 
 fn apply_provider(snapshot: ProviderSnapshot, language: crate::config::Language) -> Result<bool> {
@@ -214,16 +428,6 @@ fn apply_provider(snapshot: ProviderSnapshot, language: crate::config::Language)
     profile.codex_config = snapshot.codex_config;
     crate::provider::save(&profile)?;
     Ok(created)
-}
-
-fn local_accounts() -> Result<Vec<AccountSnapshot>> {
-    let mut snapshots = Vec::new();
-    for alias in crate::profile::list_profiles()? {
-        let path = crate::profile::profile_auth_path(&alias)?;
-        let auth = crate::auth::read_auth(&path)?;
-        snapshots.push(AccountSnapshot { alias, auth });
-    }
-    Ok(snapshots)
 }
 
 fn apply_account(snapshot: AccountSnapshot) -> Result<bool> {
@@ -278,4 +482,145 @@ fn settings_path() -> Result<PathBuf> {
 
 fn password_path() -> Result<PathBuf> {
     Ok(crate::auth::app_home()?.join("sync.password"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Env {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+        old_home: Option<std::ffi::OsString>,
+        old_codex: Option<std::ffi::OsString>,
+        old_app: Option<std::ffi::OsString>,
+    }
+
+    impl Env {
+        fn new() -> Self {
+            let lock = crate::profile::TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let dir = tempfile::tempdir().unwrap();
+            let old_home = std::env::var_os("HOME");
+            let old_codex = std::env::var_os("CODEX_HOME");
+            let old_app = std::env::var_os("CODEX_SWITCH_HOME");
+            let codex = dir.path().join(".codex");
+            let app = dir.path().join(".codex-switch");
+            std::fs::create_dir_all(&codex).unwrap();
+            std::fs::create_dir_all(&app).unwrap();
+            unsafe {
+                std::env::set_var("HOME", dir.path());
+                std::env::set_var("CODEX_HOME", &codex);
+                std::env::set_var("CODEX_SWITCH_HOME", &app);
+                std::env::remove_var("OPENAI_FEDERATION_RULE_ID");
+                std::env::remove_var("OPENAI_IDENTITY_TOKEN_FILE");
+            }
+            crate::output::set_message_mode(crate::output::MessageMode::Silent);
+            Self {
+                _lock: lock,
+                _dir: dir,
+                old_home,
+                old_codex,
+                old_app,
+            }
+        }
+    }
+
+    impl Drop for Env {
+        fn drop(&mut self) {
+            restore("HOME", &self.old_home);
+            restore("CODEX_HOME", &self.old_codex);
+            restore("CODEX_SWITCH_HOME", &self.old_app);
+        }
+    }
+
+    fn restore(key: &str, value: &Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    fn save_alias(alias: &str) {
+        crate::profile::save_synced_auth(alias, &serde_json::json!({})).unwrap();
+    }
+
+    #[test]
+    fn untagged_accounts_stay_in_the_default_group() {
+        let _env = Env::new();
+        save_alias("home-a");
+        save_alias("office-a");
+        let mut index = GroupIndex::default();
+        index.accounts.insert("office-a".into(), "office".into());
+        write_index(&index).unwrap();
+
+        assert_eq!(local_group_names("home").unwrap(), ["home", "office"]);
+        let home = accounts_in_group("home", "home").unwrap();
+        let office = accounts_in_group("office", "home").unwrap();
+        assert_eq!(home.len(), 1);
+        assert_eq!(home[0].alias, "home-a");
+        assert_eq!(office.len(), 1);
+        assert_eq!(office[0].alias, "office-a");
+    }
+
+    #[test]
+    fn replacing_a_group_removes_accounts_that_left_it() {
+        let _env = Env::new();
+        save_alias("keep");
+        save_alias("drop");
+        save_alias("other");
+        let mut index = GroupIndex::default();
+        index.accounts.insert("other".into(), "office".into());
+        write_index(&index).unwrap();
+        std::fs::write(crate::auth::current_file().unwrap(), "keep").unwrap();
+
+        let document = GroupDocument {
+            schema: 2,
+            group: "home".into(),
+            accounts: vec![AccountSnapshot {
+                alias: "keep".into(),
+                auth: serde_json::json!({}),
+            }],
+            providers: Vec::new(),
+        };
+        let counts = replace_local_group("home", "home", &document).unwrap();
+        assert_eq!(counts.removed, 1);
+        assert!(crate::profile::profile_auth_path("keep").unwrap().exists());
+        assert!(!crate::profile::profile_auth_path("drop").unwrap().exists());
+        assert!(crate::profile::profile_auth_path("other").unwrap().exists());
+        assert_eq!(local_group_names("home").unwrap(), ["home", "office"]);
+    }
+
+    #[test]
+    fn active_account_is_kept_when_the_snapshot_omits_it() {
+        let _env = Env::new();
+        save_alias("keep");
+        std::fs::write(crate::auth::current_file().unwrap(), "keep").unwrap();
+        let document = GroupDocument {
+            schema: 2,
+            group: "home".into(),
+            accounts: Vec::new(),
+            providers: Vec::new(),
+        };
+        let counts = replace_local_group("home", "home", &document).unwrap();
+        assert_eq!(counts.removed, 0);
+        assert_eq!(counts.skipped, 1);
+        assert!(crate::profile::profile_auth_path("keep").unwrap().exists());
+    }
+
+    #[test]
+    fn full_upload_removes_remote_groups_absent_locally() {
+        let remote = vec!["home".into(), "old-laptop".into(), "office".into()];
+        let keep = vec!["home".into(), "office".into()];
+        assert_eq!(
+            remote_groups_to_remove(&remote, &keep),
+            vec!["old-laptop".to_string()]
+        );
+        assert_eq!(
+            group_name_from_key("cs:v1:group/office").as_deref(),
+            Some("office")
+        );
+        assert!(group_name_from_key("cs:v1:other/office").is_none());
+    }
 }

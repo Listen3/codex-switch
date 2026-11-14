@@ -11,6 +11,8 @@ use super::app::Tab;
 #[derive(Debug, Clone, Default)]
 pub struct HitMap {
     pub tabs: Vec<(Rect, Tab)>,
+    /// Account group filter chips. `None` is the All chip.
+    pub group_tabs: Vec<(Rect, Option<String>)>,
     pub account_list: Option<ListHit>,
     pub provider_list: Option<ListHit>,
     pub logs: Option<Rect>,
@@ -93,6 +95,12 @@ impl HitMap {
         let rel = usize::from(row.saturating_sub(list.rows_area.y));
         let idx = list.offset.saturating_add(rel);
         (idx < list.row_count).then_some(idx)
+    }
+
+    pub fn group_tab_at(&self, column: u16, row: u16) -> Option<Option<String>> {
+        self.group_tabs.iter().find_map(|(rect, group)| {
+            Self::contains(*rect, column, row).then(|| group.clone())
+        })
     }
 
     pub fn tab_at(&self, column: u16, row: u16) -> Option<Tab> {

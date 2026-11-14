@@ -266,13 +266,13 @@ pub const KEYMAP: &[Binding] = &[
     Binding {
         keys: "p",
         section: Section::Sync,
-        label: "pull this group",
+        label: "choose groups to download",
         in_status_bar: false,
     },
     Binding {
         keys: "u",
         section: Section::Sync,
-        label: "upload this group",
+        label: "choose groups to upload",
         in_status_bar: false,
     },
     // Global

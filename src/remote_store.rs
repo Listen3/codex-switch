@@ -86,10 +86,29 @@ pub async fn get_text(endpoint: &Endpoint, key: &str) -> Result<Option<String>> 
             let addr = addr.clone();
             let password = password.clone();
             let key = key.to_string();
-            tokio::task::spawn_blocking(move || redis_command(&addr, password.as_deref(), &["GET", &key]))
+            tokio::task::spawn_blocking(move || redis_text(&addr, password.as_deref(), &["GET", &key]))
                 .await
                 .context("redis 任务中断")?
                 .map(empty_to_none)
+        }
+    }
+}
+
+pub async fn list_text(endpoint: &Endpoint, pattern: &str) -> Result<Vec<String>> {
+    match endpoint {
+        Endpoint::Rest { base, token } => {
+            let value = rest_result(base, token, vec!["KEYS".into(), pattern.into()]).await?;
+            json_string_list(&value)
+        }
+        Endpoint::Redis { addr, password } => {
+            let addr = addr.clone();
+            let password = password.clone();
+            let pattern = pattern.to_string();
+            tokio::task::spawn_blocking(move || {
+                redis_list(&addr, password.as_deref(), &["KEYS", &pattern])
+            })
+            .await
+            .context("redis 任务中断")?
         }
     }
 }
@@ -111,10 +130,28 @@ pub async fn set_text(endpoint: &Endpoint, key: &str, value: &str) -> Result<()>
             let key = key.to_string();
             let value = value.to_string();
             tokio::task::spawn_blocking(move || {
-                redis_command(&addr, password.as_deref(), &["SET", &key, &value])
+                redis_text(&addr, password.as_deref(), &["SET", &key, &value])
             })
             .await
             .context("redis 任务中断")??;
+            Ok(())
+        }
+    }
+}
+
+pub async fn delete_text(endpoint: &Endpoint, key: &str) -> Result<()> {
+    match endpoint {
+        Endpoint::Rest { base, token } => {
+            rest_command(base, token, vec!["DEL".into(), key.into()]).await?;
+            Ok(())
+        }
+        Endpoint::Redis { addr, password } => {
+            let addr = addr.clone();
+            let password = password.clone();
+            let key = key.to_string();
+            tokio::task::spawn_blocking(move || redis_text(&addr, password.as_deref(), &["DEL", &key]))
+                .await
+                .context("redis 任务中断")??;
             Ok(())
         }
     }
@@ -146,6 +183,10 @@ fn split_authority(rest: &str) -> (Option<&str>, &str) {
 }
 
 async fn rest_command(base: &str, token: &str, args: Vec<String>) -> Result<String> {
+    json_text(&rest_result(base, token, args).await?)
+}
+
+async fn rest_result(base: &str, token: &str, args: Vec<String>) -> Result<serde_json::Value> {
     let client = crate::auth::build_http_client()?;
     let response = client
         .post(base)
@@ -162,14 +203,50 @@ async fn rest_command(base: &str, token: &str, args: Vec<String>) -> Result<Stri
     if !status.is_success() {
         bail!("Upstash 返回 HTTP {status}");
     }
-    match &body["result"] {
+    Ok(body.get("result").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+fn json_text(value: &serde_json::Value) -> Result<String> {
+    match value {
         serde_json::Value::Null => Ok(String::new()),
         serde_json::Value::String(text) => Ok(text.clone()),
         other => Ok(other.to_string()),
     }
 }
 
-fn redis_command(addr: &str, password: Option<&str>, args: &[&str]) -> Result<String> {
+fn json_string_list(value: &serde_json::Value) -> Result<Vec<String>> {
+    match value {
+        serde_json::Value::Null => Ok(Vec::new()),
+        serde_json::Value::Array(items) => Ok(items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()),
+        serde_json::Value::String(text) if text.is_empty() => Ok(Vec::new()),
+        _ => bail!("无法识别 redis 响应"),
+    }
+}
+
+enum RedisReply {
+    Text(String),
+    List(Vec<String>),
+}
+
+fn redis_text(addr: &str, password: Option<&str>, args: &[&str]) -> Result<String> {
+    match redis_command(addr, password, args)? {
+        RedisReply::Text(text) => Ok(text),
+        RedisReply::List(_) => bail!("无法识别 redis 响应"),
+    }
+}
+
+fn redis_list(addr: &str, password: Option<&str>, args: &[&str]) -> Result<Vec<String>> {
+    match redis_command(addr, password, args)? {
+        RedisReply::List(items) => Ok(items),
+        RedisReply::Text(text) if text.is_empty() => Ok(Vec::new()),
+        RedisReply::Text(_) => bail!("无法识别 redis 响应"),
+    }
+}
+
+fn redis_command(addr: &str, password: Option<&str>, args: &[&str]) -> Result<RedisReply> {
     let socket = addr
         .to_socket_addrs()
         .with_context(|| format!("redis 地址无效: {addr}"))?
@@ -181,14 +258,16 @@ fn redis_command(addr: &str, password: Option<&str>, args: &[&str]) -> Result<St
     stream.set_write_timeout(Some(Duration::from_secs(8)))?;
     if let Some(password) = password {
         let reply = send(&mut stream, &["AUTH", password])?;
-        if reply.starts_with("ERR") || reply.starts_with("WRONGPASS") {
+        if let RedisReply::Text(text) = reply
+            && (text.starts_with("ERR") || text.starts_with("WRONGPASS"))
+        {
             bail!("redis 密码不正确");
         }
     }
     send(&mut stream, args)
 }
 
-fn send(stream: &mut TcpStream, args: &[&str]) -> Result<String> {
+fn send(stream: &mut TcpStream, args: &[&str]) -> Result<RedisReply> {
     let mut payload = format!("*{}\r\n", args.len()).into_bytes();
     for arg in args {
         payload.extend_from_slice(format!("${}\r\n", arg.len()).as_bytes());
@@ -199,30 +278,45 @@ fn send(stream: &mut TcpStream, args: &[&str]) -> Result<String> {
     read_reply(stream)
 }
 
-fn read_reply(stream: &mut TcpStream) -> Result<String> {
+fn read_reply(stream: &mut impl Read) -> Result<RedisReply> {
     let line = read_line(stream)?;
     let prefix = line.as_bytes().first().copied().context("redis 响应为空")?;
     let rest = &line[1..];
     match prefix {
-        b'+' => Ok(rest.to_string()),
+        b'+' | b':' => Ok(RedisReply::Text(rest.to_string())),
         b'-' => bail!("redis 返回错误"),
-        b':' => Ok(rest.to_string()),
-        b'$' => {
-            let len: isize = rest.parse().context("redis bulk 长度无效")?;
-            if len < 0 {
-                return Ok(String::new());
+        b'$' => Ok(RedisReply::Text(read_bulk(stream, rest)?)),
+        b'*' => {
+            let count: isize = rest.parse().context("redis 数组长度无效")?;
+            if count < 0 {
+                return Ok(RedisReply::List(Vec::new()));
             }
-            let mut body = vec![0_u8; len as usize];
-            stream.read_exact(&mut body).context("读取 redis 数据失败")?;
-            let mut crlf = [0_u8; 2];
-            stream.read_exact(&mut crlf)?;
-            Ok(String::from_utf8(body).context("redis 数据不是 UTF-8")?)
+            let mut items = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                match read_reply(stream)? {
+                    RedisReply::Text(text) => items.push(text),
+                    RedisReply::List(_) => bail!("无法识别 redis 响应"),
+                }
+            }
+            Ok(RedisReply::List(items))
         }
         _ => bail!("无法识别 redis 响应"),
     }
 }
 
-fn read_line(stream: &mut TcpStream) -> Result<String> {
+fn read_bulk(stream: &mut impl Read, rest: &str) -> Result<String> {
+    let len: isize = rest.parse().context("redis bulk 长度无效")?;
+    if len < 0 {
+        return Ok(String::new());
+    }
+    let mut body = vec![0_u8; len as usize];
+    stream.read_exact(&mut body).context("读取 redis 数据失败")?;
+    let mut crlf = [0_u8; 2];
+    stream.read_exact(&mut crlf)?;
+    String::from_utf8(body).context("redis 数据不是 UTF-8")
+}
+
+fn read_line(stream: &mut impl Read) -> Result<String> {
     let mut line = Vec::new();
     let mut byte = [0_u8; 1];
     loop {
@@ -273,6 +367,27 @@ mod tests {
         assert_eq!(
             display_url("rediss://default:secret@example.upstash.io:6379"),
             "rediss://example.upstash.io:6379"
+        );
+    }
+
+    #[test]
+    fn keys_reply_lists_bulk_strings() {
+        let raw = b"*2\r\n$16\r\ncs:v1:group/home\r\n$17\r\ncs:v1:group/other\r\n";
+        let reply = read_reply(&mut &raw[..]).unwrap();
+        match reply {
+            RedisReply::List(items) => {
+                assert_eq!(items, ["cs:v1:group/home", "cs:v1:group/other"]);
+            }
+            RedisReply::Text(_) => panic!("expected a list"),
+        }
+    }
+
+    #[test]
+    fn json_keys_result_keeps_only_strings() {
+        let value = serde_json::json!(["cs:v1:group/home", 1, "cs:v1:group/other"]);
+        assert_eq!(
+            json_string_list(&value).unwrap(),
+            ["cs:v1:group/home", "cs:v1:group/other"]
         );
     }
 }

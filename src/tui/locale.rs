@@ -48,6 +48,10 @@ pub struct Copy {
     pub sync_pull: &'static str,
     pub sync_push: &'static str,
     pub sync_help: &'static str,
+    pub picker_upload_title: &'static str,
+    pub picker_download_title: &'static str,
+    pub picker_upload_help: &'static str,
+    pub picker_download_help: &'static str,
     pub sync_busy: &'static str,
     pub sync_saved: &'static str,
     pub all_accounts: &'static str,
@@ -167,8 +171,10 @@ pub fn phrase(language: Language, english: &'static str) -> &'static str {
         "scroll session logs" => "滚动日志",
         "jump to latest log" => "跳到最新日志",
         "edit field, or pull / push the focused action" => "编辑字段，或执行拉取 / 上传",
-        "pull this group" => "拉取这一组",
-        "upload this group" => "上传这一组",
+        "pull this group" => "选择要下载的分组",
+        "upload this group" => "选择要上传的分组",
+        "choose groups to download" => "选择要下载的分组",
+        "choose groups to upload" => "选择要上传的分组",
         "toggle auto-refresh" => "开关自动刷新",
         "click tabs/rows; double-click rows opens menus; wheel scrolls logs/help/menus" => "点击页签和行；双击行打开菜单；滚轮滚动日志、帮助和菜单",
         "next / previous tab (Accounts / Providers / Settings / Logs)" => "下一个 / 上一个页（账号 / 提供方 / 设置 / 日志）",
@@ -199,6 +205,68 @@ pub fn pushed(language: Language, group: &str, count: usize) -> String {
             "Uploaded group {group} with {count} account(s). The remote group with this name was replaced."
         ),
         Language::Zh => format!("已上传分组 {group}，{count} 个账号。同名分组已被覆盖。"),
+    }
+}
+
+pub fn uploaded(language: Language, groups: usize, accounts: usize, removed_remote: usize) -> String {
+    match language {
+        Language::En => {
+            let mut message = format!(
+                "Uploaded {groups} group(s), {accounts} account(s). Matching remote groups were replaced."
+            );
+            if removed_remote > 0 {
+                message.push_str(&format!(
+                    " Removed {removed_remote} remote group(s) that are not on this computer."
+                ));
+            }
+            message
+        }
+        Language::Zh => {
+            let mut message =
+                format!("已上传 {groups} 个分组、{accounts} 个账号。线上同名分组已覆盖。");
+            if removed_remote > 0 {
+                message.push_str(&format!(
+                    " 另删除了线上 {removed_remote} 个本机没有的分组。"
+                ));
+            }
+            message
+        }
+    }
+}
+
+pub fn downloaded(
+    language: Language,
+    groups: usize,
+    created: usize,
+    updated: usize,
+    removed: usize,
+    skipped: usize,
+) -> String {
+    match language {
+        Language::En => {
+            let mut message = format!(
+                "Downloaded {groups} group(s): {created} added, {updated} updated, {removed} removed."
+            );
+            if skipped > 0 {
+                message.push_str(&format!(" Skipped {skipped}."));
+            }
+            message
+        }
+        Language::Zh => {
+            let mut message =
+                format!("已下载 {groups} 个分组，新增 {created}，更新 {updated}，移除 {removed}。");
+            if skipped > 0 {
+                message.push_str(&format!(" 跳过 {skipped} 个。"));
+            }
+            message
+        }
+    }
+}
+
+pub fn no_remote_groups(language: Language) -> String {
+    match language {
+        Language::En => "No remote groups".to_string(),
+        Language::Zh => "线上没有分组".to_string(),
     }
 }
 
@@ -279,16 +347,20 @@ const EN: Copy = Copy {
     saved: "Saved config.toml",
     sync_tab: " Sync ",
     sync_title: " Sync ",
-    sync_intro_1: "The group name defaults to this computer and can be changed. Only the same name overwrites.",
+    sync_intro_1: "Upload and download open the group list. Enter runs the checked groups. a runs every group.",
     sync_intro_2: "Accepts redis://host:port, Upstash rediss://, or an Upstash https:// REST URL.",
     sync_group: "Group",
     sync_url: "Redis URL",
     sync_password: "Password",
     sync_unset: "not set",
     sync_set: "set",
-    sync_pull: "Pull     download this group's ChatGPT accounts",
-    sync_push: "Upload   replace the remote group with this computer's accounts",
-    sync_help: "↑↓ move    Enter edit or run    p pull    u upload    uploads saved ChatGPT accounts",
+    sync_pull: "Pull     choose remote groups and replace those local groups",
+    sync_push: "Upload   choose local groups and replace those remote groups",
+    sync_help: "↑↓ move    Enter edit or open groups    p pull    u upload",
+    picker_upload_title: " Upload groups ",
+    picker_download_title: " Download groups ",
+    picker_upload_help: "space check   enter upload checked   a upload all and replace every remote group   esc cancel",
+    picker_download_help: "space check   enter download checked   a download all   esc cancel",
     sync_busy: "Connecting…",
     sync_saved: "Saved on this computer",
     all_accounts: " All ",
@@ -369,16 +441,20 @@ const ZH: Copy = Copy {
     saved: "已保存 config.toml",
     sync_tab: " 同步 ",
     sync_title: " 同步 ",
-    sync_intro_1: "分组名默认是这台计算机的名字，回车可以改。只有同名才会互相覆盖。",
+    sync_intro_1: "上传和下载都会先列出分组。回车处理勾选的组，a 处理全部。",
     sync_intro_2: "支持 redis://主机:端口、Upstash 的 rediss://，或 https:// REST 地址。",
     sync_group: "分组名",
     sync_url: "Redis 地址",
     sync_password: "密码",
     sync_unset: "未填写",
     sync_set: "已填写",
-    sync_pull: "拉取     下载这个分组里的 ChatGPT 账号",
-    sync_push: "上传     用这台电脑的账号覆盖线上同名分组",
-    sync_help: "↑↓ 选择    Enter 编辑或执行    p 拉取    u 上传    上传已保存的 ChatGPT 账号",
+    sync_pull: "拉取     选择线上分组，覆盖同步到本机",
+    sync_push: "上传     选择本机分组，覆盖线上同名分组",
+    sync_help: "↑↓ 选择    Enter 编辑或打开分组    p 拉取    u 上传",
+    picker_upload_title: " 上传分组 ",
+    picker_download_title: " 下载分组 ",
+    picker_upload_help: "空格勾选   回车上传勾选   a 全部上传并覆盖线上所有分组   esc 取消",
+    picker_download_help: "空格勾选   回车下载勾选   a 下载全部并覆盖本机对应分组   esc 取消",
     sync_busy: "正在连接…",
     sync_saved: "已保存到本机",
     all_accounts: " 全部 ",

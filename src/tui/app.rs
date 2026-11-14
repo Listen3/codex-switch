@@ -242,8 +242,10 @@ pub struct App {
     pub settings: super::settings::SettingsState,
     /// Manual Redis group sync.
     pub sync_page: super::sync_page::SyncPage,
-    sync_rx: tokio::sync::mpsc::Receiver<Result<String, String>>,
-    sync_tx: tokio::sync::mpsc::Sender<Result<String, String>>,
+    /// `None` shows every account. A name shows that saved group.
+    pub account_group: Option<String>,
+    sync_rx: tokio::sync::mpsc::Receiver<Result<super::sync_page::SyncReport, String>>,
+    sync_tx: tokio::sync::mpsc::Sender<Result<super::sync_page::SyncReport, String>>,
     /// Active interface language. English until Settings saves another choice.
     pub language: crate::config::Language,
     /// Active top-level tab.
@@ -354,6 +356,7 @@ impl App {
             provider_launch: None,
             settings: super::settings::SettingsState::from_config(cfg.clone()),
             sync_page: super::sync_page::SyncPage::load(),
+            account_group: None,
             sync_rx,
             sync_tx,
             language: cfg.language,
@@ -858,7 +861,15 @@ impl App {
 
     pub fn poll_sync(&mut self) {
         while let Ok(result) = self.sync_rx.try_recv() {
-            self.sync_page.finish(result);
+            let reload = self.sync_page.finish(result, self.language);
+            if reload {
+                if let Some(group) = self.account_group.clone()
+                    && !self.sync_page.group_names().iter().any(|name| name == &group)
+                {
+                    self.account_group = None;
+                }
+                self.load_profiles();
+            }
         }
     }
 
@@ -867,23 +878,51 @@ impl App {
             return;
         }
         let command = self.sync_page.handle_key(code, self.language);
-        let pull = match command {
-            super::sync_page::SyncCommand::None => return,
-            super::sync_page::SyncCommand::Pull => true,
-            super::sync_page::SyncCommand::Push => false,
-        };
         let settings = self.sync_page.settings.clone();
         let language = self.language;
-        self.sync_page.begin();
         let tx = self.sync_tx.clone();
-        tokio::spawn(async move {
-            let result = if pull {
-                crate::sync_store::pull(&settings, language).await
-            } else {
-                crate::sync_store::push(&settings, language).await
-            };
-            let _ = tx.send(result.map_err(|error| error.to_string())).await;
-        });
+        match command {
+            super::sync_page::SyncCommand::None => {}
+            super::sync_page::SyncCommand::ListRemote => {
+                self.sync_page.begin();
+                tokio::spawn(async move {
+                    let result = crate::sync_store::list_remote_groups(&settings)
+                        .await
+                        .map(super::sync_page::SyncReport::RemoteGroups)
+                        .map_err(|error| error.to_string());
+                    let _ = tx.send(result).await;
+                });
+            }
+            super::sync_page::SyncCommand::PushGroups {
+                groups,
+                replace_remote,
+            } => {
+                self.sync_page.begin();
+                tokio::spawn(async move {
+                    let result = crate::sync_store::push_groups(
+                        &settings,
+                        language,
+                        &groups,
+                        replace_remote,
+                    )
+                    .await
+                    .map(super::sync_page::SyncReport::Note)
+                    .map_err(|error| error.to_string());
+                    let _ = tx.send(result).await;
+                });
+            }
+            super::sync_page::SyncCommand::PullGroups { groups } => {
+                self.sync_page.begin();
+                tokio::spawn(async move {
+                    let result =
+                        crate::sync_store::pull_groups(&settings, language, &groups)
+                            .await
+                            .map(super::sync_page::SyncReport::Changed)
+                            .map_err(|error| error.to_string());
+                    let _ = tx.send(result).await;
+                });
+            }
+        }
     }
 
     /// Switch to `tab` (no-op if already there). Reloads Settings from disk
@@ -1007,6 +1046,13 @@ impl App {
                     }
                     match self.active_tab {
                         Tab::Accounts => {
+                            if let Some(group) = self.hitmap.group_tab_at(col, row) {
+                                self.account_group = group;
+                                self.selected = 0;
+                                self.update_view();
+                                self.last_list_click = None;
+                                return None;
+                            }
                             if let Some(list) = self.hitmap.account_list.as_ref()
                                 && let Some(idx) = HitMap::list_index_at(list, col, row)
                                 && let Some(account_idx) = self.view_indices.get(idx).copied()
@@ -1141,6 +1187,8 @@ impl App {
                     self.clear_marks();
                 }
             }
+            KeyCode::Char('[') => self.cycle_account_group(false),
+            KeyCode::Char(']') => self.cycle_account_group(true),
             KeyCode::Down | KeyCode::Char('j') if self.selected + 1 < self.view_indices.len() => {
                 self.selected += 1;
             }
@@ -1695,10 +1743,33 @@ impl App {
         loaded
     }
 
+    fn cycle_account_group(&mut self, forward: bool) {
+        let names = self.sync_page.group_names();
+        if names.len() < 2 {
+            return;
+        }
+        let order: Vec<Option<String>> = std::iter::once(None)
+            .chain(names.into_iter().map(Some))
+            .collect();
+        let position = order
+            .iter()
+            .position(|item| item == &self.account_group)
+            .unwrap_or(0);
+        let next = if forward {
+            (position + 1) % order.len()
+        } else {
+            (position + order.len() - 1) % order.len()
+        };
+        self.account_group = order[next].clone();
+        self.selected = 0;
+        self.update_view();
+    }
+
     /// Recompute `view_indices` based on the current search query.
     pub fn update_view(&mut self) {
         let selected_account_idx = self.selected_account_idx();
 
+        let default_group = self.sync_page.settings.group_name.clone();
         self.view_indices = match &self.search {
             None => (0..self.accounts.len()).collect(),
             Some(s) if s.query.is_empty() => (0..self.accounts.len()).collect(),
@@ -1728,6 +1799,12 @@ impl App {
                     .collect()
             }
         };
+        if let Some(group) = self.account_group.clone() {
+            self.view_indices.retain(|&index| {
+                crate::sync_store::account_group(&self.accounts[index].alias, &default_group)
+                    == group
+            });
+        }
 
         match self.sort_mode {
             SortMode::Name => {}
@@ -3214,7 +3291,7 @@ async fn run_app(
                         app.handle_settings_key(key.code);
                         continue;
                     }
-                    if app.active_tab == Tab::Sync && app.sync_page.is_editing() {
+                    if app.active_tab == Tab::Sync && app.sync_page.captures_keys() {
                         app.handle_sync_key(key.code);
                         continue;
                     }

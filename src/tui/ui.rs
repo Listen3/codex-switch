@@ -53,7 +53,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(1), Constraint::Min(6)])
                     .split(content);
-                render_group_tabs(f, split[0], &groups, app.language);
+                render_group_tabs(f, app, split[0], &groups);
                 split[1]
             } else {
                 content
@@ -127,18 +127,44 @@ pub fn render(f: &mut Frame, app: &mut App) {
         || app.rename.is_some()
         || app.search_active
         || (app.active_tab == Tab::Settings && app.settings.is_editing())
-        || (app.active_tab == Tab::Sync && app.sync_page.is_editing())
+        || (app.active_tab == Tab::Sync && app.sync_page.captures_keys())
     {
         app.hitmap.overlay = super::hitmap::OverlayHit::Modal;
     }
 }
 
-fn render_group_tabs(f: &mut Frame, area: Rect, groups: &[String], language: crate::config::Language) {
-    let text = super::locale::t(language);
-    let mut spans = vec![Span::styled(text.all_accounts, highlight())];
-    for name in groups {
-        spans.push(Span::styled("  ", base()));
-        spans.push(Span::styled(format!(" {name} "), base().fg(C_GRAY)));
+fn render_group_tabs(f: &mut Frame, app: &mut App, area: Rect, groups: &[String]) {
+    let text = super::locale::t(app.language);
+    let mut x = area.x;
+    let mut spans = Vec::new();
+    let chips = std::iter::once(None).chain(groups.iter().cloned().map(Some));
+    for group in chips {
+        if x > area.x {
+            let gap = 2;
+            spans.push(Span::styled("  ", base()));
+            x = x.saturating_add(gap);
+        }
+        let label = match &group {
+            None => text.all_accounts.to_string(),
+            Some(name) => format!(" {name} "),
+        };
+        let width = u16::try_from(display_width(&label)).unwrap_or(u16::MAX);
+        let selected = app.account_group == group;
+        let style = if selected { highlight() } else { base().fg(C_GRAY) };
+        if x < area.x.saturating_add(area.width) {
+            let room = area.x.saturating_add(area.width).saturating_sub(x);
+            app.hitmap.group_tabs.push((
+                Rect {
+                    x,
+                    y: area.y,
+                    width: width.min(room),
+                    height: 1,
+                },
+                group.clone(),
+            ));
+        }
+        spans.push(Span::styled(label, style));
+        x = x.saturating_add(width);
     }
     f.render_widget(Paragraph::new(Line::from(spans)).style(base()), area);
 }
