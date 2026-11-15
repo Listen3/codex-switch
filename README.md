@@ -68,7 +68,7 @@ codex-switch launch       # start Codex with the best account
 
 This fork keeps the upstream account manager and adds:
 
-- **Account sync.** The TUI Sync tab stores saved ChatGPT accounts in named Redis groups. The group name defaults to the computer name. Upload and download each open the group list: Enter sends the checked groups, and `a` sends every group. Uploading all also deletes remote groups that are not on this computer. Downloading a group replaces that local group, including removing accounts that left it. `redis://`, Upstash `rediss://`, and Upstash `https://` REST addresses are accepted. The upload includes each profile's `auth.json`, so keep the Redis instance private.
+- **Account sync.** The TUI Sync tab stores saved ChatGPT accounts in named Redis groups. The group name defaults to the computer name. Upload and download each open the group list: Enter sends the checked groups, and `a` sends every group. Uploading all also deletes remote groups that are not on this computer. Downloading a group replaces that local group, including removing accounts that left it. `redis://`, Upstash `rediss://`, and Upstash `https://` REST addresses are accepted. The upload includes each profile's `auth.json`, sealed with the sync password. A group saved before this seal can still be downloaded. Keep the Redis instance private.
 - **Language.** Settings defaults to English and can switch the interface to Chinese.
 - **Subscription expiry.** The Accounts table has an Expires column from `GET /backend-api/subscriptions` (`active_until`). Refresh the row to load it. Quota windows are unchanged.
 - **Auto warmup.** Settings can warm an account one minute after its 5-hour or 7-day window resets. This runs only while the TUI is open.

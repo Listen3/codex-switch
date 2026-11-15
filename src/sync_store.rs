@@ -200,7 +200,9 @@ pub async fn push_groups(
         crate::profile::validate_alias(group)?;
         let document = document_for(group, &settings.group_name)?;
         account_count += document.accounts.len();
-        let body = serde_json::to_string(&document).context("serializing group")?;
+        let plain = serde_json::to_vec(&document).context("serializing group")?;
+        let secret = sync_secret(settings, language)?;
+        let body = crate::sync_seal::seal(&secret, &plain)?;
         remote_store::set_text(&endpoint, &group_key(group), &body).await?;
     }
     let mut removed = 0_usize;
@@ -228,6 +230,7 @@ pub async fn pull_groups(
     let mut created = 0_usize;
     let mut updated = 0_usize;
     let mut removed = 0_usize;
+    let mut renamed = 0_usize;
     let mut skipped = 0_usize;
     let mut found = 0_usize;
     for group in groups {
@@ -235,8 +238,7 @@ pub async fn pull_groups(
         let Some(body) = remote_store::get_text(&endpoint, &group_key(group)).await? else {
             continue;
         };
-        let document: GroupDocument =
-            serde_json::from_str(&body).context("unrecognized group document")?;
+        let document = open_group(&body, settings, language)?;
         if document.schema != 1 && document.schema != 2 {
             anyhow::bail!(crate::tui::locale::unknown_schema(language, document.schema));
         }
@@ -244,6 +246,7 @@ pub async fn pull_groups(
         created += counts.created;
         updated += counts.updated;
         removed += counts.removed;
+        renamed += counts.renamed;
         skipped += counts.skipped;
         found += 1;
     }
@@ -256,15 +259,119 @@ pub async fn pull_groups(
         created,
         updated,
         removed,
+        renamed,
         skipped,
     ))
+}
+
+fn sync_secret(settings: &SyncSettings, language: crate::config::Language) -> Result<String> {
+    remote_store::access_secret(&settings.redis_url, &settings.password).ok_or_else(|| {
+        anyhow::anyhow!(crate::tui::locale::sync_password_required(language))
+    })
+}
+
+fn open_group(
+    body: &str,
+    settings: &SyncSettings,
+    language: crate::config::Language,
+) -> Result<GroupDocument> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).context("unrecognized group document")?;
+    let schema = value.get("schema").and_then(|item| item.as_u64()).unwrap_or(0);
+    if schema == 3 {
+        let secret = sync_secret(settings, language)?;
+        let plain = crate::sync_seal::open(&secret, body)
+            .map_err(|_| anyhow::anyhow!(crate::tui::locale::sync_decrypt_failed(language)))?;
+        return serde_json::from_slice(&plain).context("unrecognized group document");
+    }
+    serde_json::from_value(value).context("unrecognized group document")
+}
+
+fn place_synced_account(snapshot: &AccountSnapshot) -> Result<PlacedAccount> {
+    let requested = snapshot.alias.clone();
+    crate::profile::validate_alias(&requested)?;
+    let identity = crate::profile::extract_identity(&snapshot.auth);
+    if let Some(existing) = crate::profile::find_profile_by_identity_exact(&identity) {
+        crate::profile::save_synced_auth(&existing, &snapshot.auth)?;
+        return Ok(PlacedAccount {
+            renamed: existing != requested,
+            created: false,
+            stored: true,
+            alias: existing,
+        });
+    }
+    let profile_exists = crate::profile::profile_auth_path(&requested)?.exists();
+    let provider_owns_alias = crate::provider::exists(&requested);
+    if profile_exists {
+        match crate::profile::save_synced_auth(&requested, &snapshot.auth) {
+            Ok(()) => {
+                return Ok(PlacedAccount {
+                    alias: requested,
+                    created: false,
+                    renamed: false,
+                    stored: true,
+                });
+            }
+            Err(_) if proven_different_account(&requested, &snapshot.auth) => {}
+            Err(_) => {
+                return Ok(PlacedAccount {
+                    alias: requested,
+                    created: false,
+                    renamed: false,
+                    stored: false,
+                });
+            }
+        }
+    } else if !provider_owns_alias {
+        crate::profile::save_synced_auth(&requested, &snapshot.auth)?;
+        return Ok(PlacedAccount {
+            alias: requested,
+            created: true,
+            renamed: false,
+            stored: true,
+        });
+    }
+    let unique = crate::profile::make_unique_alias(&requested)?;
+    crate::profile::save_synced_auth(&unique, &snapshot.auth)?;
+    Ok(PlacedAccount {
+        alias: unique,
+        created: true,
+        renamed: true,
+        stored: true,
+    })
+}
+
+fn proven_different_account(alias: &str, incoming: &serde_json::Value) -> bool {
+    let Ok(path) = crate::profile::profile_auth_path(alias) else {
+        return false;
+    };
+    let Ok(existing) = crate::auth::read_auth(&path) else {
+        return false;
+    };
+    let existing = crate::profile::extract_identity(&existing);
+    let incoming = crate::profile::extract_identity(incoming);
+    match (existing.account_id.as_deref(), incoming.account_id.as_deref()) {
+        (Some(left), Some(right)) => left != right,
+        _ => match (existing.email.as_deref(), incoming.email.as_deref()) {
+            (Some(left), Some(right)) => !left.eq_ignore_ascii_case(right),
+            _ => false,
+        },
+    }
 }
 
 struct ApplyCounts {
     created: usize,
     updated: usize,
     removed: usize,
+    renamed: usize,
     skipped: usize,
+}
+
+struct PlacedAccount {
+    alias: String,
+    created: bool,
+    renamed: bool,
+    stored: bool,
 }
 
 fn replace_local_group(
@@ -274,23 +381,34 @@ fn replace_local_group(
 ) -> Result<ApplyCounts> {
     let mut index = read_index().unwrap_or_default();
     let existing = aliases_in_group(group, default_group, &index)?;
-    let mut incoming = BTreeSet::new();
+    let mut kept = BTreeSet::new();
+    let mut displaced = BTreeSet::new();
     let mut counts = ApplyCounts {
         created: 0,
         updated: 0,
         removed: 0,
+        renamed: 0,
         skipped: 0,
     };
     for snapshot in &document.accounts {
-        incoming.insert(snapshot.alias.clone());
-        match apply_account(snapshot.clone()) {
-            Ok(true) => {
-                counts.created += 1;
-                index.accounts.insert(snapshot.alias.clone(), group.to_string());
-            }
-            Ok(false) => {
-                counts.updated += 1;
-                index.accounts.insert(snapshot.alias.clone(), group.to_string());
+        match place_synced_account(snapshot) {
+            Ok(placed) => {
+                if !placed.stored {
+                    counts.skipped += 1;
+                    kept.insert(placed.alias);
+                    continue;
+                }
+                if placed.created {
+                    counts.created += 1;
+                } else {
+                    counts.updated += 1;
+                }
+                if placed.renamed {
+                    counts.renamed += 1;
+                    displaced.insert(snapshot.alias.clone());
+                }
+                kept.insert(placed.alias.clone());
+                index.accounts.insert(placed.alias, group.to_string());
             }
             Err(_) => counts.skipped += 1,
         }
@@ -303,7 +421,7 @@ fn replace_local_group(
         }
     }
     for alias in existing {
-        if incoming.contains(&alias) {
+        if kept.contains(&alias) || displaced.contains(&alias) {
             continue;
         }
         if crate::profile::read_current() == alias {
@@ -427,12 +545,6 @@ fn apply_provider(snapshot: ProviderSnapshot, language: crate::config::Language)
     profile.wire_api = snapshot.wire_api;
     profile.codex_config = snapshot.codex_config;
     crate::provider::save(&profile)?;
-    Ok(created)
-}
-
-fn apply_account(snapshot: AccountSnapshot) -> Result<bool> {
-    let created = !crate::profile::profile_auth_path(&snapshot.alias)?.exists();
-    crate::profile::save_synced_auth(&snapshot.alias, &snapshot.auth)?;
     Ok(created)
 }
 
@@ -622,5 +734,70 @@ mod tests {
             Some("office")
         );
         assert!(group_name_from_key("cs:v1:other/office").is_none());
+    }
+
+    fn account(account_id: &str, email: &str) -> serde_json::Value {
+        use base64::Engine;
+        let payload = format!("{{\"email\":\"{email}\"}}");
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+        serde_json::json!({
+            "tokens": {
+                "account_id": account_id,
+                "id_token": format!("e30.{encoded}."),
+                "refresh_token": "refresh",
+                "access_token": "access"
+            }
+        })
+    }
+
+    #[test]
+    fn alias_taken_by_another_account_is_saved_under_a_new_name() {
+        let _env = Env::new();
+        crate::profile::save_synced_auth("work", &account("acct-a", "a@example.com")).unwrap();
+        let document = GroupDocument {
+            schema: 2,
+            group: "office".into(),
+            accounts: vec![AccountSnapshot {
+                alias: "work".into(),
+                auth: account("acct-b", "b@example.com"),
+            }],
+            providers: Vec::new(),
+        };
+        let counts = replace_local_group("office", "home", &document).unwrap();
+        assert_eq!(counts.renamed, 1);
+        assert_eq!(counts.removed, 0);
+        let original = crate::profile::extract_identity(
+            &crate::auth::read_auth(&crate::profile::profile_auth_path("work").unwrap()).unwrap(),
+        );
+        let renamed = crate::profile::extract_identity(
+            &crate::auth::read_auth(&crate::profile::profile_auth_path("work_2").unwrap()).unwrap(),
+        );
+        assert_eq!(original.account_id.as_deref(), Some("acct-a"));
+        assert_eq!(renamed.account_id.as_deref(), Some("acct-b"));
+    }
+
+    #[test]
+    fn sealed_document_opens_only_with_the_sync_password() {
+        let plain = serde_json::to_vec(&GroupDocument {
+            schema: 2,
+            group: "home".into(),
+            accounts: Vec::new(),
+            providers: Vec::new(),
+        })
+        .unwrap();
+        let sealed = crate::sync_seal::seal("secret", &plain).unwrap();
+        assert!(!sealed.contains("refresh_token"));
+        let settings = SyncSettings {
+            group_name: "home".into(),
+            redis_url: "redis://127.0.0.1:6379".into(),
+            password: "secret".into(),
+        };
+        let opened = open_group(&sealed, &settings, crate::config::Language::En).unwrap();
+        assert_eq!(opened.group, "home");
+        let wrong = SyncSettings {
+            password: "other".into(),
+            ..settings
+        };
+        assert!(open_group(&sealed, &wrong, crate::config::Language::En).is_err());
     }
 }

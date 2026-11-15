@@ -1201,7 +1201,7 @@ pub fn cmd_save(alias: Option<&str>) -> Result<SaveAction> {
     Ok(SaveAction::Created(resolved_alias))
 }
 
-fn make_unique_alias(base: &str) -> Result<String> {
+pub(crate) fn make_unique_alias(base: &str) -> Result<String> {
     const MAX_RETRIES: u32 = 1000;
     let mut n: u32 = 2;
     loop {

@@ -240,6 +240,7 @@ pub fn downloaded(
     created: usize,
     updated: usize,
     removed: usize,
+    renamed: usize,
     skipped: usize,
 ) -> String {
     match language {
@@ -247,6 +248,11 @@ pub fn downloaded(
             let mut message = format!(
                 "Downloaded {groups} group(s): {created} added, {updated} updated, {removed} removed."
             );
+            if renamed > 0 {
+                message.push_str(&format!(
+                    " {renamed} conflicting alias(es) were saved under a new name."
+                ));
+            }
             if skipped > 0 {
                 message.push_str(&format!(" Skipped {skipped}."));
             }
@@ -255,11 +261,28 @@ pub fn downloaded(
         Language::Zh => {
             let mut message =
                 format!("已下载 {groups} 个分组，新增 {created}，更新 {updated}，移除 {removed}。");
+            if renamed > 0 {
+                message.push_str(&format!(" {renamed} 个别名冲突，已改存为新别名。"));
+            }
             if skipped > 0 {
                 message.push_str(&format!(" 跳过 {skipped} 个。"));
             }
             message
         }
+    }
+}
+
+pub fn sync_password_required(language: Language) -> String {
+    match language {
+        Language::En => "Set the sync password before uploading. It encrypts the group, including account credentials.".to_string(),
+        Language::Zh => "上传前要先填写同步密码。分组内容（含账号凭据）会用这个密码加密。".to_string(),
+    }
+}
+
+pub fn sync_decrypt_failed(language: Language) -> String {
+    match language {
+        Language::En => "Could not decrypt this group. Check the sync password.".to_string(),
+        Language::Zh => "无法解密这一组。请检查同步密码。".to_string(),
     }
 }
 
@@ -348,7 +371,7 @@ const EN: Copy = Copy {
     sync_tab: " Sync ",
     sync_title: " Sync ",
     sync_intro_1: "Upload and download open the group list. Enter runs the checked groups. a runs every group.",
-    sync_intro_2: "Accepts redis://host:port, Upstash rediss://, or an Upstash https:// REST URL.",
+    sync_intro_2: "Accepts redis://host:port, Upstash rediss://, or an Upstash https:// REST URL. The password encrypts uploaded groups.",
     sync_group: "Group",
     sync_url: "Redis URL",
     sync_password: "Password",
@@ -442,7 +465,7 @@ const ZH: Copy = Copy {
     sync_tab: " 同步 ",
     sync_title: " 同步 ",
     sync_intro_1: "上传和下载都会先列出分组。回车处理勾选的组，a 处理全部。",
-    sync_intro_2: "支持 redis://主机:端口、Upstash 的 rediss://，或 https:// REST 地址。",
+    sync_intro_2: "支持 redis://主机:端口、Upstash 的 rediss://，或 https:// REST 地址。同步密码会加密上传的分组。",
     sync_group: "分组名",
     sync_url: "Redis 地址",
     sync_password: "密码",

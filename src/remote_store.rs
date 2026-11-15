@@ -67,6 +67,22 @@ pub fn parse(url: &str, password: &str) -> Result<Endpoint> {
     bail!("地址格式用 https://、rediss://，或 redis://主机:端口");
 }
 
+/// Secret used for the Redis connection. The separate password wins over userinfo.
+/// Callers must not log the returned value.
+pub fn access_secret(url: &str, password: &str) -> Option<String> {
+    if let Some(secret) = nonempty(password) {
+        return Some(secret);
+    }
+    let url = url.trim();
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("rediss://"))
+        .or_else(|| url.strip_prefix("redis://"))?;
+    let (userinfo, _) = split_authority(rest);
+    first_secret(userinfo, "")
+}
+
 pub fn display_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();

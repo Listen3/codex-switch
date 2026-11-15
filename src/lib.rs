@@ -43,6 +43,7 @@ mod remote_store;
 #[allow(dead_code)]
 mod signals;
 #[allow(dead_code)]
+mod sync_seal;
 mod sync_store;
 #[allow(dead_code)]
 mod tui;
