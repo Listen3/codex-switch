@@ -136,6 +136,7 @@ pub fn phrase(language: Language, english: &'static str) -> &'static str {
         "upload" => "上传",
         "move" => "选择",
         "move selection" => "移动选择",
+        "switch account group" => "切换分组",
         "open selected account actions" => "打开账号操作",
         "add new account" => "添加账号",
         "refresh visible accounts" => "刷新可见账号",

@@ -1187,8 +1187,8 @@ impl App {
                     self.clear_marks();
                 }
             }
-            KeyCode::Char('[') => self.cycle_account_group(false),
-            KeyCode::Char(']') => self.cycle_account_group(true),
+            KeyCode::Left | KeyCode::Char('[') => self.cycle_account_group(false),
+            KeyCode::Right | KeyCode::Char(']') => self.cycle_account_group(true),
             KeyCode::Down | KeyCode::Char('j') if self.selected + 1 < self.view_indices.len() => {
                 self.selected += 1;
             }

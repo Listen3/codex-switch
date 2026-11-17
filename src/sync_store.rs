@@ -60,11 +60,9 @@ fn default_wire() -> String {
     "responses".to_string()
 }
 
-pub fn default_group_name() -> String {
-    let raw = std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "this-pc".to_string());
+pub fn sanitize_group_name(raw: &str) -> String {
     let mut name: String = raw
+        .trim()
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
@@ -74,12 +72,59 @@ pub fn default_group_name() -> String {
             }
         })
         .collect();
-    name.truncate(64);
-    if name.is_empty() {
-        "this-pc".to_string()
-    } else {
-        name
+    while name.contains("--") {
+        name = name.replace("--", "-");
     }
+    name = name.trim_matches(['-', '.']).to_string();
+    name.truncate(64);
+    name
+}
+
+fn usable_host_name(name: String) -> Option<String> {
+    let name = name.trim().to_string();
+    if name.is_empty() || name.eq_ignore_ascii_case("localhost") {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+fn detected_host_name() -> Option<String> {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .and_then(usable_host_name)
+        .or_else(posix_host_name)
+        .or_else(|| std::env::var("HOSTNAME").ok().and_then(usable_host_name))
+}
+
+#[cfg(unix)]
+fn posix_host_name() -> Option<String> {
+    let mut buf = [0_u8; 256];
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|byte| *byte == 0).unwrap_or(buf.len());
+    usable_host_name(String::from_utf8_lossy(&buf[..end]).into_owned())
+}
+
+#[cfg(not(unix))]
+fn posix_host_name() -> Option<String> {
+    None
+}
+
+pub fn default_group_name() -> String {
+    if let Some(name) = detected_host_name() {
+        let name = sanitize_group_name(&name);
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    let name = sanitize_group_name(&user);
+    if name.is_empty() { "computer".to_string() } else { name }
 }
 
 pub fn load() -> SyncSettings {
@@ -88,13 +133,21 @@ pub fn load() -> SyncSettings {
         redis_url: String::new(),
         password: String::new(),
     });
-    if settings.group_name.trim().is_empty() {
-        settings.group_name = default_group_name();
-    }
     settings.password = std::fs::read_to_string(password_path().unwrap_or_default())
         .unwrap_or_default()
         .trim()
         .to_string();
+    if settings.group_name.trim().is_empty() || settings.group_name == "this-pc" {
+        let detected = default_group_name();
+        if settings.group_name != detected {
+            let previous = settings.group_name.clone();
+            settings.group_name = detected;
+            if previous == "this-pc" {
+                let _ = rename_group("this-pc", &settings.group_name);
+            }
+            let _ = save(&settings);
+        }
+    }
     settings
 }
 
@@ -656,6 +709,26 @@ mod tests {
 
     fn save_alias(alias: &str) {
         crate::profile::save_synced_auth(alias, &serde_json::json!({})).unwrap();
+    }
+
+    #[test]
+    fn group_name_uses_the_computer_name_instead_of_this_pc() {
+        assert_ne!(default_group_name(), "this-pc");
+        assert!(crate::profile::validate_alias(&default_group_name()).is_ok());
+        assert_eq!(sanitize_group_name("Listen's MacBook Pro"), "Listen-s-MacBook-Pro");
+        assert_eq!(sanitize_group_name("..."), "");
+    }
+
+    #[test]
+    fn placeholder_this_pc_is_replaced_with_the_real_computer_name() {
+        let _env = Env::new();
+        let path = settings_path().unwrap();
+        std::fs::write(&path, "group_name = \"this-pc\"\nredis_url = \"\"\n").unwrap();
+        let settings = load();
+        assert_ne!(settings.group_name, "this-pc");
+        assert_eq!(settings.group_name, default_group_name());
+        let stored = std::fs::read_to_string(path).unwrap();
+        assert!(!stored.contains("this-pc"));
     }
 
     #[test]

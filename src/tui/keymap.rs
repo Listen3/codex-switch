@@ -64,6 +64,12 @@ pub const KEYMAP: &[Binding] = &[
         in_status_bar: true,
     },
     Binding {
+        keys: "← →",
+        section: Section::Account,
+        label: "switch account group",
+        in_status_bar: false,
+    },
+    Binding {
         keys: "/",
         section: Section::Account,
         label: "search",

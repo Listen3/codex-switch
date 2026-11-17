@@ -157,7 +157,7 @@ fn render_group_tabs(f: &mut Frame, app: &mut App, area: Rect, groups: &[String]
                 Rect {
                     x,
                     y: area.y,
-                    width: width.min(room),
+                    width: width.saturating_add(2).min(room),
                     height: 1,
                 },
                 group.clone(),
@@ -165,6 +165,11 @@ fn render_group_tabs(f: &mut Frame, app: &mut App, area: Rect, groups: &[String]
         }
         spans.push(Span::styled(label, style));
         x = x.saturating_add(width);
+    }
+    let hint = "  ← →";
+    let hint_width = u16::try_from(display_width(hint)).unwrap_or(6);
+    if x.saturating_add(hint_width) <= area.x.saturating_add(area.width) {
+        spans.push(Span::styled(hint, base().fg(C_GRAY)));
     }
     f.render_widget(Paragraph::new(Line::from(spans)).style(base()), area);
 }
