@@ -4333,7 +4333,7 @@ fn refresh_existing_run_config(
     write_codex_config(run_config_path, &refreshed)
 }
 
-fn link_user_entry(src: &Path, dest: &Path) -> Result<()> {
+pub(crate) fn link_user_entry(src: &Path, dest: &Path) -> Result<()> {
     if !src.exists() {
         return Ok(());
     }

@@ -160,6 +160,7 @@ jobs:
           cp LICENSE "$STAGE/LICENSE"
           cp assets/upstream-codex/LICENSE "$STAGE/THIRD-PARTY-LICENSES/upstream-codex/LICENSE"
           cp assets/upstream-codex/NOTICE.md "$STAGE/THIRD-PARTY-LICENSES/upstream-codex/NOTICE.md"
+          cp assets/desktop-dependencies-LICENSES.txt "$STAGE/THIRD-PARTY-LICENSES/desktop-dependencies-LICENSES.txt"
           tar czf "${{ matrix.name }}.tar.gz" -C "$STAGE" codex-switch LICENSE THIRD-PARTY-LICENSES
           shasum -a 256 "${{ matrix.name }}.tar.gz" > "${{ matrix.name }}.tar.gz.sha256"
 
@@ -176,6 +177,7 @@ jobs:
           cp LICENSE "$STAGE/LICENSE"
           cp assets/upstream-codex/LICENSE "$STAGE/THIRD-PARTY-LICENSES/upstream-codex/LICENSE"
           cp assets/upstream-codex/NOTICE.md "$STAGE/THIRD-PARTY-LICENSES/upstream-codex/NOTICE.md"
+          cp assets/desktop-dependencies-LICENSES.txt "$STAGE/THIRD-PARTY-LICENSES/desktop-dependencies-LICENSES.txt"
           (cd "$STAGE" && 7z a "../${{ matrix.name }}.zip" codex-switch.exe LICENSE THIRD-PARTY-LICENSES)
           sha256sum "${{ matrix.name }}.zip" > "${{ matrix.name }}.zip.sha256"
 
@@ -334,6 +336,8 @@ jobs:
         run: |
           cat > dev_body.md << EOF
           Development build from \`${GITHUB_REF}\` at ${GITHUB_SHA}.
+
+          Desktop instances inherit local settings, portable projects and conversations, and pin order. Each instance has its own login and conversation data. Quit an existing instance before relaunching it to apply the workspace migration.
 
           **This is a pre-release build for testing.** Use \`codex-switch self-update --dev\` to install, or \`codex-switch self-update --stable\` to return to the latest stable release.
 

@@ -10,6 +10,9 @@ use sysinfo::{ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, Upda
 use crate::{auth, profile, provider};
 use provider::ReasoningLaunch;
 
+mod settings;
+mod workspace;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LaunchTarget {
     Desktop,
@@ -100,14 +103,28 @@ pub(crate) fn launch(
     let home = data.join("codex-home");
     let mut command = desktop_command(&executable, &data, &home);
     let config_path = home.join("config.toml");
-    let mut config: toml::Table = match std::fs::read_to_string(&config_path) {
-        Ok(text) => toml::from_str(&text).context("reading desktop config")?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
-        Err(error) => return Err(error.into()),
+    let mut config = settings::read_config(&config_path)?;
+    let inherited = home.join(settings::INHERITED);
+    let needs_settings = !inherited.is_file();
+    let inherited_workspace = home.join(workspace::INHERITED);
+    let needs_workspace = !is_provider && !inherited_workspace.is_file();
+    let source = if needs_settings || needs_workspace {
+        let mut source = std::path::absolute(auth::user_codex_home()?)?;
+        if source.starts_with(std::path::absolute(auth::app_home()?)?) {
+            source = dirs::home_dir()
+                .context("finding the default Codex home")?
+                .join(".codex");
+        }
+        if needs_settings {
+            settings::inherit(&source, &home, &mut config)?;
+        }
+        Some(source)
+    } else {
+        None
     };
-    config.remove("model_reasoning_effort");
     if is_provider {
         let p = provider::load(alias)?;
+        config.remove("model_reasoning_effort");
         // Rebuild the definition from the saved provider, including removals.
         // Headers from an older endpoint must never be sent to a replacement.
         if let Some(providers) = config
@@ -135,23 +152,27 @@ pub(crate) fn launch(
         auth::ensure_file_credentials_store()?;
         let saved = auth::read_auth(&account_auth)?;
         auth::validate_managed_auth_value(&saved)?;
+        if let Some(source) = source.as_deref().filter(|_| needs_workspace) {
+            workspace::inherit(source, &home, &executable, &saved)?;
+        }
         let window_auth = home.join("auth.json");
         if auth::read_auth(&window_auth).ok().as_ref() != Some(&saved) {
             auth::write_auth(&window_auth, &saved)?;
         }
         let (_, refresh_token) = auth::extract_tokens(&saved);
         write_token_marker(&home, refresh_token.as_deref())?;
-        config.insert("cli_auth_credentials_store".into(), "file".into());
-        config.remove("model");
-        if let Some(model) = model {
-            config.insert("model".into(), model.into());
-        }
-        if let ReasoningLaunch::Effort(effort) = reasoning {
-            config.insert("model_reasoning_effort".into(), effort.into());
-        }
+        settings::apply_account_launch(&mut config, model, reasoning);
     }
 
+    // The inherited client configuration can point to a shared runtime database.
+    config.remove("sqlite_home");
     auth::atomic_write_private(&config_path, toml::to_string(&config)?.as_bytes())?;
+    if needs_settings {
+        auth::atomic_write_private(&inherited, b"1")?;
+    }
+    if needs_workspace {
+        auth::atomic_write_private(&inherited_workspace, b"1")?;
+    }
     let mut child = command.spawn().context("starting Codex Desktop")?;
     if let Err(error) = std::fs::write(data.join("launcher.pid"), child.id().to_string()) {
         stop_launcher(&mut child);
@@ -176,6 +197,7 @@ fn desktop_command(executable: &Path, data: &Path, home: &Path) -> Command {
         .env("CODEX_HOME", home)
         .env("CODEX_ELECTRON_USER_DATA_PATH", data)
         .env_remove("CODEX_CLI_PATH")
+        .env_remove("CODEX_SQLITE_HOME")
         .arg(user_data_arg(data))
         .stdin(Stdio::null())
         .stdout(Stdio::null())

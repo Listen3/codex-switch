@@ -1,5 +1,11 @@
 # Changelog
 
+## v20261127.1.0 — 2026-11-27
+
+- Desktop instances inherit the default Codex configuration, skills, rules, and completed onboarding. Windows instances initialize their own native sandbox when Codex requests it.
+- ChatGPT desktop instances inherit portable local projects and conversations, including compressed and archived conversations, project membership, and pinned thread order.
+- Each account keeps its own credential and conversation files. Previously created instances pick up the workspace migration when the corresponding desktop app has quit and is launched again.
+
 ## v20261126.1.0 ? 2026-11-26
 
 - The TUI launch picker switches between Desktop and CLI with Tab and remembers the most recent choice for each account or provider.
