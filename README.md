@@ -47,7 +47,9 @@ In the dashboard, press `o` to open the selected account's launch picker. Use **
 
 Desktop launches use the installed Codex or ChatGPT desktop app. Each account or provider has one desktop instance with its own app data. A new instance inherits settings and completed onboarding from your regular Codex, including `config.toml`, MCP configuration, skills, and rules. ChatGPT instances also inherit local projects and complete local conversations that are not tied to another account. Previously created instances pick up missing settings and local workspace data at their next start. Launching an account again brings its existing window forward. Different accounts can run side by side. Quit the app before renaming or removing the profile. Quitting keeps the session, while signing out in the desktop app can revoke the shared account token. Set `CODEX_SWITCH_DESKTOP_PATH` for a custom installation. Shell commands such as `codex-switch launch work -- <args>` start the CLI and forward the arguments.
 
-Desktop instances have separate conversation files and databases. The initial import preserves the pin order of copied conversations. Instances can still open the same project folder.
+By default, desktop instances have separate conversation files and databases. The initial import preserves the pin order of copied conversations. Instances can still open the same project folder.
+
+Enable **Share Desktop sessions** (`launch.share_desktop_sessions`) in Settings to use the default Codex application's local conversation library. Quit and relaunch each account window to switch libraries. Each window keeps its own login. Turning sharing off and relaunching brings back that window's previous copy. Codex can report that a conversation is in use when another process has its writer lock.
 
 On Windows, if Codex shows “Finish Windows setup to continue,” select Continue in that instance to initialize its native sandbox.
 

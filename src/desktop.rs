@@ -11,6 +11,7 @@ use crate::{auth, profile, provider};
 use provider::ReasoningLaunch;
 
 mod settings;
+mod shared;
 mod workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,7 +101,12 @@ pub(crate) fn launch(
     }
 
     let data = windows.join("desktop-window-1");
-    let home = data.join("codex-home");
+    let share_sessions = !is_provider && crate::config::get().launch.share_desktop_sessions;
+    let home = data.join(if share_sessions {
+        shared::HOME
+    } else {
+        "codex-home"
+    });
     let mut command = desktop_command(&executable, &data, &home);
     let config_path = home.join("config.toml");
     let mut config = settings::read_config(&config_path)?;
@@ -108,7 +114,7 @@ pub(crate) fn launch(
     let needs_settings = !inherited.is_file();
     let inherited_workspace = home.join(workspace::INHERITED);
     let needs_workspace = !is_provider && !inherited_workspace.is_file();
-    let source = if needs_settings || needs_workspace {
+    let source = if needs_settings || needs_workspace || share_sessions {
         let mut source = std::path::absolute(auth::user_codex_home()?)?;
         if source.starts_with(std::path::absolute(auth::app_home()?)?) {
             source = dirs::home_dir()
@@ -152,8 +158,23 @@ pub(crate) fn launch(
         auth::ensure_file_credentials_store()?;
         let saved = auth::read_auth(&account_auth)?;
         auth::validate_managed_auth_value(&saved)?;
-        if let Some(source) = source.as_deref().filter(|_| needs_workspace) {
-            workspace::inherit(source, &home, &executable, &saved)?;
+        if let Some(source) = source.as_deref() {
+            if share_sessions {
+                let sqlite_home = shared::connect(source, &home)?;
+                config.insert(
+                    "sqlite_home".into(),
+                    sqlite_home.to_string_lossy().as_ref().into(),
+                );
+                config.insert(
+                    "log_dir".into(),
+                    home.join("log").to_string_lossy().as_ref().into(),
+                );
+                if needs_workspace {
+                    workspace::inherit_shared_layout(source, &home, &sqlite_home, &saved)?;
+                }
+            } else if needs_workspace {
+                workspace::inherit(source, &home, &executable, &saved)?;
+            }
         }
         let window_auth = home.join("auth.json");
         if auth::read_auth(&window_auth).ok().as_ref() != Some(&saved) {
@@ -165,7 +186,9 @@ pub(crate) fn launch(
     }
 
     // The inherited client configuration can point to a shared runtime database.
-    config.remove("sqlite_home");
+    if !share_sessions {
+        config.remove("sqlite_home");
+    }
     auth::atomic_write_private(&config_path, toml::to_string(&config)?.as_bytes())?;
     if needs_settings {
         auth::atomic_write_private(&inherited, b"1")?;
@@ -252,9 +275,10 @@ pub(crate) fn sync_profiles() {
 }
 
 pub(crate) fn sync_account_profile(alias: &str, path: &Path) {
-    if !path.parent().is_some_and(|parent| {
-        window_dirs(parent).any(|data| data.join("codex-home").join(TOKEN_MARKER).is_file())
-    }) {
+    if !path
+        .parent()
+        .is_some_and(|parent| account_homes(parent).any(|home| home.join(TOKEN_MARKER).is_file()))
+    {
         return;
     }
     match profile::lock_auth_transaction() {
@@ -269,12 +293,15 @@ fn sync_account_profile_locked(alias: &str, path: &Path) {
     let Some(parent) = path.parent() else {
         return;
     };
-    for data in window_dirs(parent) {
-        let home = data.join("codex-home");
+    for home in account_homes(parent) {
         if let Err(error) = adopt_window_auth(alias, path, &home) {
             tracing::warn!(%alias, %error, "could not save refreshed desktop credentials");
         }
     }
+}
+
+fn account_homes(parent: &Path) -> impl Iterator<Item = PathBuf> {
+    window_dirs(parent).flat_map(|data| [data.join("codex-home"), data.join(shared::HOME)])
 }
 
 fn adopt_window_auth(alias: &str, saved_path: &Path, home: &Path) -> Result<()> {
@@ -461,6 +488,9 @@ pub(crate) fn ensure_window_closed(root: &Path, alias: &str) -> Result<()> {
         .is_some()
     {
         anyhow::bail!("close the Codex Desktop window for '{alias}' first");
+    }
+    for data in window_dirs(root) {
+        shared::prepare_profile_move(&std::path::absolute(data.join(shared::HOME))?)?;
     }
     Ok(())
 }

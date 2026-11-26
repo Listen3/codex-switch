@@ -5,6 +5,7 @@
 - Desktop instances inherit the default Codex configuration, skills, rules, and completed onboarding. Windows instances initialize their own native sandbox when Codex requests it.
 - ChatGPT desktop instances inherit portable local projects and conversations, including compressed and archived conversations, project membership, and pinned thread order.
 - Each account keeps its own credential and conversation files. Previously created instances pick up the workspace migration when the corresponding desktop app has quit and is launched again.
+- The Share Desktop sessions setting lets account windows use the default Codex conversation library. Each account keeps its login and its previous conversation copy. Codex still coordinates access to each conversation through its native writer lock.
 
 ## v20261126.1.0 ? 2026-11-26
 

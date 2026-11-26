@@ -155,12 +155,15 @@ pub struct LaunchConfig {
     /// Codex CLI reads auth.json only at startup; this delay ensures it finishes reading
     /// before the original auth is restored.
     pub restore_delay_secs: u64,
+    /// Use the default Codex home as the conversation library for desktop accounts.
+    pub share_desktop_sessions: bool,
 }
 
 impl Default for LaunchConfig {
     fn default() -> Self {
         Self {
             restore_delay_secs: 3,
+            share_desktop_sessions: false,
         }
     }
 }

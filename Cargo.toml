@@ -71,6 +71,7 @@ sqlite = { version = "0.37.4", features = ["bundled"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+junction = "2.1"
 windows-sys = { version = "=0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",

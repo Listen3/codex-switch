@@ -337,7 +337,7 @@ jobs:
           cat > dev_body.md << EOF
           Development build from \`${GITHUB_REF}\` at ${GITHUB_SHA}.
 
-          Desktop instances inherit local settings, portable projects and conversations, and pin order. Each instance has its own login and conversation data. Quit an existing instance before relaunching it to apply the workspace migration.
+          Desktop instances inherit local settings, portable projects and conversations, and pin order. Enable **Share Desktop sessions** in Settings to use the default Codex conversation library across account windows. Each account keeps its login and its previous conversation copy. Quit and relaunch account windows to switch libraries.
 
           **This is a pre-release build for testing.** Use \`codex-switch self-update --dev\` to install, or \`codex-switch self-update --stable\` to return to the latest stable release.
 

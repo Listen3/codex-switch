@@ -223,31 +223,34 @@ fn has_table(db: &Connection, name: &str) -> Result<bool> {
     Ok(stmt.next()? == State::Row)
 }
 
-fn copy_native_projects(
-    source: &Connection,
-    target: &Connection,
-    imported: &mut Map<String, Value>,
-) -> Result<()> {
-    if !has_table(source, "project_roots")?
-        || !has_table(target, "projects")?
-        || !has_table(target, "project_roots")?
-    {
-        return Ok(());
+struct NativeProject {
+    id: String,
+    name: String,
+    position: i64,
+    created: i64,
+    updated: i64,
+    roots: Vec<String>,
+}
+
+impl NativeProject {
+    fn layout(&self) -> Value {
+        json!({
+            "id":self.id, "name":self.name, "rootPaths":self.roots,
+            "createdAt":self.created, "updatedAt":self.updated
+        })
+    }
+}
+
+fn read_native_projects(source: &Connection) -> Result<Vec<NativeProject>> {
+    let mut found = Vec::new();
+    if !has_table(source, "projects")? || !has_table(source, "project_roots")? {
+        return Ok(found);
     }
     let mut projects = source.prepare(
-        "SELECT id, name, position, created_at_ms, updated_at_ms FROM projects
-         WHERE EXISTS (SELECT 1 FROM project_roots WHERE project_id=projects.id)
-         ORDER BY position",
+        "SELECT id,name,position,created_at_ms,updated_at_ms FROM projects ORDER BY position",
     )?;
     let mut roots =
         source.prepare("SELECT path FROM project_roots WHERE project_id=? ORDER BY position")?;
-    let mut insert = target.prepare(
-        "INSERT INTO projects (id,name,position,created_at_ms,updated_at_ms)
-         VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
-    )?;
-    let mut add_root =
-        target.prepare("INSERT INTO project_roots (project_id, position, path) VALUES (?,?,?)")?;
-    target.execute("BEGIN IMMEDIATE")?;
     while projects.next()? == State::Row {
         let id = projects.read::<String, _>(0)?;
         roots.bind((1, id.as_str()))?;
@@ -259,27 +262,52 @@ fn copy_native_projects(
             }
         }
         roots.reset()?;
-        if paths.is_empty() {
-            continue;
+        if !paths.is_empty() {
+            found.push(NativeProject {
+                id,
+                name: projects.read(1)?,
+                position: projects.read(2)?,
+                created: projects.read(3)?,
+                updated: projects.read(4)?,
+                roots: paths,
+            });
         }
-        let name = projects.read::<String, _>(1)?;
-        let created = projects.read::<i64, _>(3)?;
-        let updated = projects.read::<i64, _>(4)?;
-        imported.entry(&id).or_insert_with(|| json!({
-            "id": id, "name": name, "rootPaths": paths, "createdAt": created, "updatedAt": updated
-        }));
-        insert.bind((1, id.as_str()))?;
-        insert.bind((2, name.as_str()))?;
-        for col in 2..5 {
-            insert.bind((col + 1, projects.read::<i64, _>(col)?))?;
-        }
+    }
+    Ok(found)
+}
+
+fn copy_native_projects(
+    source: &Connection,
+    target: &Connection,
+    imported: &mut Map<String, Value>,
+) -> Result<()> {
+    if !has_table(target, "projects")? || !has_table(target, "project_roots")? {
+        return Ok(());
+    }
+    let projects = read_native_projects(source)?;
+    let mut insert = target.prepare(
+        "INSERT INTO projects (id,name,position,created_at_ms,updated_at_ms)
+         VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+    )?;
+    let mut add_root =
+        target.prepare("INSERT INTO project_roots (project_id, position, path) VALUES (?,?,?)")?;
+    target.execute("BEGIN IMMEDIATE")?;
+    for project in projects {
+        imported
+            .entry(&project.id)
+            .or_insert_with(|| project.layout());
+        insert.bind((1, project.id.as_str()))?;
+        insert.bind((2, project.name.as_str()))?;
+        insert.bind((3, project.position))?;
+        insert.bind((4, project.created))?;
+        insert.bind((5, project.updated))?;
         insert.next()?;
         insert.reset()?;
         if target.change_count() == 0 {
             continue;
         }
-        for (position, path) in paths.iter().enumerate() {
-            add_root.bind((1, id.as_str()))?;
+        for (position, path) in project.roots.iter().enumerate() {
+            add_root.bind((1, project.id.as_str()))?;
             add_root.bind((2, position as i64))?;
             add_root.bind((3, path.as_str()))?;
             add_root.next()?;
@@ -287,6 +315,43 @@ fn copy_native_projects(
         }
     }
     target.execute("COMMIT")?;
+    Ok(())
+}
+
+pub(super) fn inherit_shared_layout(
+    source: &Path,
+    home: &Path,
+    sqlite_home: &Path,
+    credentials: &Value,
+) -> Result<()> {
+    let mut native = Map::new();
+    let mut pins = Vec::new();
+    if let Some(db) = open_db(
+        &sqlite_home.join(STATE_DB),
+        OpenFlags::new().with_read_only(),
+    )? {
+        for project in read_native_projects(&db)? {
+            native.insert(project.id.clone(), project.layout());
+        }
+        pins = read_section_threads(&db, true)?;
+    }
+    let mut rollouts = BTreeMap::new();
+    for dir in ["sessions", "archived_sessions"] {
+        collect_rollouts(source, Path::new(dir), &mut rollouts)?;
+    }
+    let paths = rollouts
+        .iter()
+        .filter(|(id, _)| has_complete_history(id, &rollouts))
+        .map(|(id, rollout)| (id.clone(), home.join(&rollout.path)))
+        .collect();
+    copy_project_layout(
+        source,
+        home,
+        renderer_owner(credentials).as_deref(),
+        native,
+        &paths,
+        &pins,
+    )?;
     Ok(())
 }
 
