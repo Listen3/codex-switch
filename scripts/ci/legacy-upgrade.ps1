@@ -2,7 +2,7 @@
 # to this workflow's unpublished build artifacts, which a local GitHub API mock
 # serves. See legacy-upgrade.sh for the scenarios.
 #
-# usage: legacy-upgrade.ps1 -Legacy <0.0.19|20260804.1.0>
+# usage: legacy-upgrade.ps1 -Legacy <0.0.19|20260804.1.0|20261114.1.0>
 # env: EXPECTED_VERSION, IS_DEV, GITHUB_SHA, RUNNER_TEMP; ARTIFACTS_DIR
 # (default: artifacts). `gh attestation verify` checks the bundle offline.
 param([Parameter(Mandatory = $true)][string]$Legacy)
@@ -22,6 +22,7 @@ $asset = 'cs-windows-amd64.zip'
 $pinnedHashes = @{
   '0.0.19'       = '9ff8a3f8794517771ef6959632417fdf1dfbc85b7fdf4c344998223985582e63'
   '20260804.1.0' = '2702116e852f8bf3563a0dc892ab6bab2792679c090054d184d65f43b9224e4b'
+  '20261114.1.0' = 'a9adf7216e4245f94d2afbc635044710eefc5ade16fbe8431b0a1b1f63c4eb98'
 }
 if (-not $pinnedHashes.ContainsKey($Legacy)) { throw "No reviewed fixture for v$Legacy $asset" }
 
@@ -31,13 +32,14 @@ $artifactRoot = Join-Path $apiRoot 'artifacts'
 New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
 Copy-Item -Path (Join-Path $artifactsDir '*') -Destination $artifactRoot -Force
 
+$fixtureRepo = if ($Legacy -eq '20261114.1.0') { 'Listen3/codex-switch' } else { 'xjoker/codex-switch' }
 if ($env:IS_DEV -eq 'true') {
-  $apiPath = 'repos/xjoker/codex-switch/releases/tags/dev'
+  $apiPath = "repos/$fixtureRepo/releases/tags/dev"
   $releaseTag = 'dev'
   $releaseName = "dev ($env:EXPECTED_VERSION)"
   $channel = '--dev'
 } else {
-  $apiPath = 'repos/xjoker/codex-switch/releases/latest'
+  $apiPath = "repos/$fixtureRepo/releases/latest"
   $releaseTag = "v$env:EXPECTED_VERSION"
   $releaseName = $releaseTag
   $channel = '--stable'
@@ -49,7 +51,7 @@ if ($env:IS_DEV -eq 'true') {
   --tag $releaseTag `
   --name $releaseName `
   --extra-asset codex-switch-build-provenance.json `
-  --tag-ref-output (Join-Path $apiRoot "repos/xjoker/codex-switch/git/ref/tags/$releaseTag") `
+  --tag-ref-output (Join-Path $apiRoot "repos/$fixtureRepo/git/ref/tags/$releaseTag") `
   --commit-sha $env:GITHUB_SHA
 if ($LASTEXITCODE -ne 0) { throw 'local release metadata generation failed' }
 
@@ -78,7 +80,7 @@ try {
     } catch { $false }
   }
 
-  $base = "https://github.com/xjoker/codex-switch/releases/download/v$Legacy"
+  $base = "https://github.com/$fixtureRepo/releases/download/v$Legacy"
   $archive = Join-Path $work $asset
   Invoke-WebRequest -Uri "$base/$asset" -OutFile $archive
   Invoke-WebRequest -Uri "$base/$asset.sha256" -OutFile "$archive.sha256"
@@ -102,9 +104,9 @@ try {
     }
   }
 
-  if ($Legacy -eq '0.0.19') {
+  if ($Legacy -ne '20260804.1.0') {
     & $bin self-update $channel
-    if ($LASTEXITCODE -ne 0) { throw 'v0.0.19 self-update failed' }
+    if ($LASTEXITCODE -ne 0) { throw "v$Legacy self-update failed" }
     Assert-Upgraded
     return
   }

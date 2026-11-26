@@ -7,6 +7,7 @@
 #   0.0.19        plain self-update (no provenance check in that updater)
 #   20260804.1.0  last stable with the removed daemon: its updater verifies
 #                 build provenance and restarts the daemon with the new binary
+#   20261114.1.0  first Listen3 release, verifies the fork's provenance
 #
 # env: EXPECTED_VERSION, IS_DEV, GITHUB_SHA, RUNNER_TEMP; ARTIFACTS_DIR
 # (default: artifacts). The provenance check runs `gh attestation verify`
@@ -39,6 +40,10 @@ case "$legacy/$asset" in
   20260804.1.0/cs-linux-arm64.tar.gz) pinned_hash="f1b1fd3eb3843d5e1b9eb578d5296eb6938b828c0a34d1aa7b996d0abb6cdbac" ;;
   20260804.1.0/cs-darwin-amd64.tar.gz) pinned_hash="459c01026ccd46660408c36944b2001ba0337248fdae2c094515410a587ac986" ;;
   20260804.1.0/cs-darwin-arm64.tar.gz) pinned_hash="b89e3d82a300795feaba9aa8e51d1675877f0072bfc44fb4a70a9d05f261bd41" ;;
+  20261114.1.0/cs-linux-amd64.tar.gz) pinned_hash="309082e0f8840012327d31bf99adaec4f8ecc18231d7140ded9205fe4292ebb4" ;;
+  20261114.1.0/cs-linux-arm64.tar.gz) pinned_hash="02defa1c5b4b2a8991d9a8a3ffdf410986747dcd234745ca55551624bac0a42d" ;;
+  20261114.1.0/cs-darwin-amd64.tar.gz) pinned_hash="40a351320116da329eb9de82d9b93091c0a44fa8cea48728eff72c17be894ff7" ;;
+  20261114.1.0/cs-darwin-arm64.tar.gz) pinned_hash="4e89deae5ffb48621afb84551a7b6573f70c5c43851e305fcb0fea310c0f51c9" ;;
   *) echo "No reviewed fixture for v$legacy $asset" >&2; exit 1 ;;
 esac
 
@@ -48,13 +53,17 @@ api_root="${work}/api"
 mkdir -p "$home" "$api_root/artifacts"
 cp "$artifacts_dir"/* "$api_root/artifacts/"
 
+fixture_repo=xjoker/codex-switch
+if [[ "$legacy" == "20261114.1.0" ]]; then
+  fixture_repo=Listen3/codex-switch
+fi
 if [[ "$IS_DEV" == "true" ]]; then
-  api_path="repos/xjoker/codex-switch/releases/tags/dev"
+  api_path="repos/${fixture_repo}/releases/tags/dev"
   release_tag="dev"
   release_name="dev (${EXPECTED_VERSION})"
   channel="--dev"
 else
-  api_path="repos/xjoker/codex-switch/releases/latest"
+  api_path="repos/${fixture_repo}/releases/latest"
   release_tag="v${EXPECTED_VERSION}"
   release_name="$release_tag"
   channel="--stable"
@@ -66,7 +75,7 @@ python3 "$repo_root/scripts/prepare-release-metadata.py" \
   --tag "$release_tag" \
   --name "$release_name" \
   --extra-asset codex-switch-build-provenance.json \
-  --tag-ref-output "${api_root}/repos/xjoker/codex-switch/git/ref/tags/${release_tag}" \
+  --tag-ref-output "${api_root}/repos/${fixture_repo}/git/ref/tags/${release_tag}" \
   --commit-sha "$GITHUB_SHA"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$api_root" >/dev/null 2>&1 &
@@ -84,7 +93,7 @@ for attempt in 1 2 3 4 5; do
   sleep 1
 done
 
-base="https://github.com/xjoker/codex-switch/releases/download/v${legacy}"
+base="https://github.com/${fixture_repo}/releases/download/v${legacy}"
 curl -fsSL "${base}/${asset}" -o "${work}/${asset}"
 curl -fsSL "${base}/${asset}.sha256" -o "${work}/${asset}.sha256"
 (
@@ -120,7 +129,7 @@ wait_until() {
 no_daemon_process() { ! pgrep -f "${bin} daemon start" >/dev/null; }
 launch_job_absent() { ! launchctl list "$label" >/dev/null 2>&1; }
 
-if [[ "$legacy" == "0.0.19" ]]; then
+if [[ "$legacy" != "20260804.1.0" ]]; then
   "$bin" self-update "$channel"
   assert_upgraded
   exit 0

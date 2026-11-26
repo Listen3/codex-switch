@@ -10,8 +10,14 @@ use anyhow::{Context, Result, bail};
 
 #[derive(Debug, Clone)]
 pub enum Endpoint {
-    Rest { base: String, token: String },
-    Redis { addr: String, password: Option<String> },
+    Rest {
+        base: String,
+        token: String,
+    },
+    Redis {
+        addr: String,
+        password: Option<String>,
+    },
 }
 
 pub fn parse(url: &str, password: &str) -> Result<Endpoint> {
@@ -102,10 +108,12 @@ pub async fn get_text(endpoint: &Endpoint, key: &str) -> Result<Option<String>> 
             let addr = addr.clone();
             let password = password.clone();
             let key = key.to_string();
-            tokio::task::spawn_blocking(move || redis_text(&addr, password.as_deref(), &["GET", &key]))
-                .await
-                .context("redis 任务中断")?
-                .map(empty_to_none)
+            tokio::task::spawn_blocking(move || {
+                redis_text(&addr, password.as_deref(), &["GET", &key])
+            })
+            .await
+            .context("redis 任务中断")?
+            .map(empty_to_none)
         }
     }
 }
@@ -132,12 +140,7 @@ pub async fn list_text(endpoint: &Endpoint, pattern: &str) -> Result<Vec<String>
 pub async fn set_text(endpoint: &Endpoint, key: &str, value: &str) -> Result<()> {
     match endpoint {
         Endpoint::Rest { base, token } => {
-            rest_command(
-                base,
-                token,
-                vec!["SET".into(), key.into(), value.into()],
-            )
-            .await?;
+            rest_command(base, token, vec!["SET".into(), key.into(), value.into()]).await?;
             Ok(())
         }
         Endpoint::Redis { addr, password } => {
@@ -165,9 +168,11 @@ pub async fn delete_text(endpoint: &Endpoint, key: &str) -> Result<()> {
             let addr = addr.clone();
             let password = password.clone();
             let key = key.to_string();
-            tokio::task::spawn_blocking(move || redis_text(&addr, password.as_deref(), &["DEL", &key]))
-                .await
-                .context("redis 任务中断")??;
+            tokio::task::spawn_blocking(move || {
+                redis_text(&addr, password.as_deref(), &["DEL", &key])
+            })
+            .await
+            .context("redis 任务中断")??;
             Ok(())
         }
     }
@@ -179,7 +184,11 @@ fn empty_to_none(value: String) -> Option<String> {
 
 fn nonempty(value: &str) -> Option<String> {
     let value = value.trim();
-    if value.is_empty() { None } else { Some(value.to_string()) }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 fn first_secret(userinfo: Option<&str>, password: &str) -> Option<String> {
@@ -219,7 +228,10 @@ async fn rest_result(base: &str, token: &str, args: Vec<String>) -> Result<serde
     if !status.is_success() {
         bail!("Upstash 返回 HTTP {status}");
     }
-    Ok(body.get("result").cloned().unwrap_or(serde_json::Value::Null))
+    Ok(body
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
 }
 
 fn json_text(value: &serde_json::Value) -> Result<String> {
@@ -326,7 +338,9 @@ fn read_bulk(stream: &mut impl Read, rest: &str) -> Result<String> {
         return Ok(String::new());
     }
     let mut body = vec![0_u8; len as usize];
-    stream.read_exact(&mut body).context("读取 redis 数据失败")?;
+    stream
+        .read_exact(&mut body)
+        .context("读取 redis 数据失败")?;
     let mut crlf = [0_u8; 2];
     stream.read_exact(&mut crlf)?;
     String::from_utf8(body).context("redis 数据不是 UTF-8")
@@ -336,7 +350,9 @@ fn read_line(stream: &mut impl Read) -> Result<String> {
     let mut line = Vec::new();
     let mut byte = [0_u8; 1];
     loop {
-        stream.read_exact(&mut byte).context("读取 redis 响应失败")?;
+        stream
+            .read_exact(&mut byte)
+            .context("读取 redis 响应失败")?;
         if byte[0] == b'\n' {
             break;
         }
@@ -347,7 +363,7 @@ fn read_line(stream: &mut impl Read) -> Result<String> {
             bail!("redis 响应过长");
         }
     }
-    Ok(String::from_utf8(line).context("redis 响应不是 UTF-8")?)
+    String::from_utf8(line).context("redis 响应不是 UTF-8")
 }
 
 #[cfg(test)]

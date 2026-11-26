@@ -43,10 +43,14 @@ codex-switch launch       # start Codex with the best account
 
 ![TUI](docs/tui.png)
 
+In the dashboard, press `o` to open the selected account's launch picker. Use **Tab** to switch between **Desktop** and **CLI**, then **Enter** to launch. The picker defaults to Desktop and remembers each account's last launch target. Providers use the same picker.
+
+Desktop launches use the installed Codex or ChatGPT desktop app. Each account or provider has one desktop instance with its own local configuration and app data. Launching it again brings the existing window forward. Different accounts can run side by side. Quit the app before renaming or removing the profile. Quitting keeps the session, while signing out in the desktop app can revoke the shared account token. Set `CODEX_SWITCH_DESKTOP_PATH` for a custom installation. Shell commands such as `codex-switch launch work -- <args>` start the CLI and forward the arguments.
+
 ## What it does
 
 - Saves, imports, renames, switches, and recoverably deletes Codex profiles.
-- **Beta — custom API providers:** save a Responses-compatible endpoint and API key, configure multiple models with per-model reasoning and `web_search`, fetch the gateway's model catalog, and launch Codex through native per-run profiles. Compatibility depends on the gateway and model. Providers do not show ChatGPT quota or participate in ChatGPT automatic account selection:
+- **Beta — custom API providers:** save a Responses-compatible endpoint and API key, configure multiple models with per-model reasoning and `web_search`, fetch the gateway's model catalog, and launch Codex Desktop or CLI. CLI launches use native per-run profiles. Compatibility depends on the gateway and model. Providers do not show ChatGPT quota or participate in ChatGPT automatic account selection:
 
   ```bash
   codex-switch provider add openrouter \

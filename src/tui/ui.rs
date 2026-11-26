@@ -16,7 +16,8 @@ use super::theme::{
 };
 use crate::jwt::PlanKind;
 use crate::output::{
-    format_local_time, format_reset_short, format_reset_time, format_subscription_date, reset_credits_count,
+    format_local_time, format_reset_short, format_reset_time, format_subscription_date,
+    reset_credits_count,
 };
 use crate::usage::{UsageInfo, format_credits_amount, is_available};
 
@@ -65,10 +66,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             };
             let rows = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(6),
-                    Constraint::Length(detail_height),
-                ])
+                .constraints([Constraint::Min(6), Constraint::Length(detail_height)])
                 .split(list_area);
             render_account_table(f, app, rows[0]);
             if app.detail_visible {
@@ -150,7 +148,11 @@ fn render_group_tabs(f: &mut Frame, app: &mut App, area: Rect, groups: &[String]
         };
         let width = u16::try_from(display_width(&label)).unwrap_or(u16::MAX);
         let selected = app.account_group == group;
-        let style = if selected { highlight() } else { base().fg(C_GRAY) };
+        let style = if selected {
+            highlight()
+        } else {
+            base().fg(C_GRAY)
+        };
         if x < area.x.saturating_add(area.width) {
             let room = area.x.saturating_add(area.width).saturating_sub(x);
             app.hitmap.group_tabs.push((
@@ -297,7 +299,7 @@ fn render_help_popup(
             lines.push(Line::from(""));
         }
         lines.push(Line::from(Span::styled(
-            super::locale::phrase(language, *heading).to_string(),
+            super::locale::phrase(language, heading).to_string(),
             heading_style,
         )));
         for (k, label) in items {
@@ -310,7 +312,7 @@ fn render_help_popup(
             }
             spans.push(Span::styled("  ", base()));
             spans.push(Span::styled(
-                super::locale::phrase(language, *label).to_string(),
+                super::locale::phrase(language, label).to_string(),
                 label_style,
             ));
             lines.push(Line::from(spans));
@@ -701,10 +703,7 @@ fn render_account_table(f: &mut Frame, app: &mut App, area: Rect) {
         format!(" {} ({})", text.tab_accounts, app.accounts.len())
     };
     if loading_count > 0 {
-        let fetching = super::locale::phrase(
-            app.language,
-            "fetching",
-        );
+        let fetching = super::locale::phrase(app.language, "fetching");
         title.push_str(&format!(" -- {fetching} {loading_count}..."));
     }
     if !app.marked.is_empty() {
@@ -1367,38 +1366,38 @@ fn normal_footer_specs(app: &App) -> Vec<FooterActionSpec> {
         Tab::Sync => {
             let text = super::locale::t(app.language);
             vec![
-            FooterActionSpec {
-                key: "↑↓",
-                label: text.footer_choose,
-                code: KeyCode::Down,
-                enabled: true,
-            },
-            FooterActionSpec {
-                key: "enter",
-                label: text.footer_edit,
-                code: KeyCode::Enter,
-                enabled: true,
-            },
-            FooterActionSpec {
-                key: "p",
-                label: text.footer_pull,
-                code: KeyCode::Char('p'),
-                enabled: true,
-            },
-            FooterActionSpec {
-                key: "u",
-                label: text.footer_upload,
-                code: KeyCode::Char('u'),
-                enabled: true,
-            },
-            FooterActionSpec {
-                key: "q",
-                label: super::locale::phrase(app.language, "quit"),
-                code: KeyCode::Char('q'),
-                enabled: true,
-            },
-        ]
-        },
+                FooterActionSpec {
+                    key: "↑↓",
+                    label: text.footer_choose,
+                    code: KeyCode::Down,
+                    enabled: true,
+                },
+                FooterActionSpec {
+                    key: "enter",
+                    label: text.footer_edit,
+                    code: KeyCode::Enter,
+                    enabled: true,
+                },
+                FooterActionSpec {
+                    key: "p",
+                    label: text.footer_pull,
+                    code: KeyCode::Char('p'),
+                    enabled: true,
+                },
+                FooterActionSpec {
+                    key: "u",
+                    label: text.footer_upload,
+                    code: KeyCode::Char('u'),
+                    enabled: true,
+                },
+                FooterActionSpec {
+                    key: "q",
+                    label: super::locale::phrase(app.language, "quit"),
+                    code: KeyCode::Char('q'),
+                    enabled: true,
+                },
+            ]
+        }
         Tab::Settings => vec![
             FooterActionSpec {
                 key: "↑",
@@ -1474,7 +1473,10 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
         let input = app.rename.as_ref().expect("rename").input.clone();
         let shown = format!("{}{input}#{}", text.rename_prefix, text.rename_suffix);
         let line = Line::from(vec![
-            Span::styled(text.rename_prefix, base().fg(C_CYAN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                text.rename_prefix,
+                base().fg(C_CYAN).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(input, base().fg(C_WHITE).add_modifier(Modifier::BOLD)),
             Span::styled("#", base().fg(C_GRAY)),
             Span::styled(text.rename_suffix, base().fg(DIM)),

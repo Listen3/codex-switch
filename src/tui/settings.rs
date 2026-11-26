@@ -301,7 +301,8 @@ impl SettingsState {
                 self.draft.launch.restore_delay_secs =
                     parse_u64(&raw, 1, "launch.restore_delay_secs")?;
             }
-            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {}
+            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {
+            }
         }
         self.dirty = true;
         Ok(())
@@ -593,7 +594,11 @@ pub fn render_settings_tab(
         settings,
         Focus::TeamPriority,
         text.team_priority,
-        bool_label(settings.draft.use_cfg.team_priority, settings.draft.language).to_string(),
+        bool_label(
+            settings.draft.use_cfg.team_priority,
+            settings.draft.language,
+        )
+        .to_string(),
         &mut lines,
         &mut line_focus,
         &mut focused_line,
@@ -663,10 +668,7 @@ pub fn render_settings_tab(
             lines.push(Line::from(Span::styled(hint_line, dim())));
             line_focus.push(None);
         }
-        lines.push(Line::from(Span::styled(
-            text.settings_help,
-            dim(),
-        )));
+        lines.push(Line::from(Span::styled(text.settings_help, dim())));
         line_focus.push(None);
     }
 

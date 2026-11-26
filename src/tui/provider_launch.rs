@@ -13,7 +13,8 @@ use ratatui::{
 use super::hitmap::{HitMap, OverlayClick, OverlayHit};
 use super::popup::{self, PopupState};
 use super::provider_form::{REASONING_CHOICES, reasoning_choice};
-use super::theme::{C_RED, base, dim, header, key};
+use super::theme::{base, dim, header, key};
+use crate::desktop::LaunchTarget;
 use crate::provider::{ProviderProfile, ReasoningLaunch};
 use crate::warmup::ModelEntry;
 
@@ -41,10 +42,7 @@ pub struct ProviderLaunchState {
     selected: usize,
     reasoning_idx: usize,
     custom_reasoning: Option<String>,
-    extra_args: String,
-    extra_error: Option<String>,
-    extra_editing: bool,
-    extra_cursor: usize,
+    target: LaunchTarget,
     last_model_click: Option<(usize, Instant)>,
     catalog_status: Option<String>,
 }
@@ -56,7 +54,7 @@ pub enum LaunchPickerOutcome {
         alias: String,
         model: String,
         reasoning: ReasoningLaunch,
-        extra_args: Vec<String>,
+        target: LaunchTarget,
     },
 }
 
@@ -89,10 +87,7 @@ impl ProviderLaunchState {
             selected,
             reasoning_idx,
             custom_reasoning,
-            extra_args: String::new(),
-            extra_error: None,
-            extra_editing: false,
-            extra_cursor: 0,
+            target: LaunchTarget::load(&profile.alias, true),
             last_model_click: None,
             catalog_status: None,
         }
@@ -101,6 +96,7 @@ impl ProviderLaunchState {
     /// Build the same launch picker for a ChatGPT account. The first row uses
     /// Codex's own default; cached authenticated `/models` entries follow it.
     pub fn from_chatgpt(alias: impl Into<String>, models: &[ModelEntry]) -> Self {
+        let alias = alias.into();
         let mut launch_models = vec![LaunchModel {
             id: String::new(),
             title: "(Codex default)".into(),
@@ -127,15 +123,12 @@ impl ProviderLaunchState {
         Self {
             popup: PopupState::new(),
             kind: LaunchKind::Account,
-            alias: alias.into(),
+            alias: alias.clone(),
             models: launch_models,
             selected: 0,
             reasoning_idx: 0,
             custom_reasoning: None,
-            extra_args: String::new(),
-            extra_error: None,
-            extra_editing: false,
-            extra_cursor: 0,
+            target: LaunchTarget::load(&alias, false),
             last_model_click: None,
             catalog_status: None,
         }
@@ -161,10 +154,7 @@ impl ProviderLaunchState {
                 replacement.reasoning_idx = previous_reasoning.0;
                 replacement.custom_reasoning = previous_reasoning.1;
             }
-            replacement.extra_args = std::mem::take(&mut self.extra_args);
-            replacement.extra_error = self.extra_error.take();
-            replacement.extra_editing = self.extra_editing;
-            replacement.extra_cursor = self.extra_cursor;
+            replacement.target = self.target;
             replacement.popup.scroll = self.popup.scroll;
             // A prior row index may refer to a different model after a refreshed
             // catalog is sorted or replaced, so it cannot safely complete a double-click.
@@ -178,15 +168,8 @@ impl ProviderLaunchState {
         self.selected
     }
 
-    pub(crate) fn extra_editing(&self) -> bool {
-        self.extra_editing
-    }
-
     /// Click a model row. A second click on the same row within 500ms launches.
     pub(crate) fn click_model(&mut self, idx: usize) -> bool {
-        if self.extra_editing {
-            self.extra_editing = false;
-        }
         if idx >= self.models.len() {
             return false;
         }
@@ -205,24 +188,14 @@ impl ProviderLaunchState {
     }
 
     pub(crate) fn click_reasoning(&mut self) {
-        if self.extra_editing {
-            self.extra_editing = false;
-        }
         self.nudge_reasoning(1);
     }
 
-    pub(crate) fn click_args(&mut self) {
-        if self.extra_editing {
-            return;
-        }
-        self.extra_editing = true;
-        self.extra_cursor = self.extra_args.chars().count();
+    pub(crate) fn toggle_target(&mut self) {
+        self.target = self.target.toggled();
     }
 
     pub(crate) fn handle_wheel(&mut self, down: bool) {
-        if self.extra_editing {
-            return;
-        }
         let _ = self.handle_key(if down { KeyCode::Down } else { KeyCode::Up });
     }
 
@@ -248,30 +221,15 @@ impl ProviderLaunchState {
         }
     }
 
-    fn extra_argv(&self) -> Result<Vec<String>, String> {
-        parse_extra_args(&self.extra_args)
-    }
-
     fn launch_outcome(&mut self) -> LaunchPickerOutcome {
         let Some(model) = self.models.get(self.selected) else {
             return LaunchPickerOutcome::Continue;
         };
-        let extra_args = match self.extra_argv() {
-            Ok(args) => args,
-            Err(error) => {
-                self.extra_error = Some(error);
-                self.extra_editing = true;
-                self.extra_cursor = self.extra_args.chars().count();
-                return LaunchPickerOutcome::Continue;
-            }
-        };
-        self.extra_error = None;
-        self.extra_editing = false;
         LaunchPickerOutcome::Launch {
             alias: self.alias.clone(),
             model: model.id.clone(),
             reasoning: self.reasoning_for_launch(),
-            extra_args,
+            target: self.target,
         }
     }
 
@@ -282,14 +240,10 @@ impl ProviderLaunchState {
     }
 
     pub fn handle_key(&mut self, code: KeyCode) -> LaunchPickerOutcome {
-        if self.extra_editing {
-            return self.handle_extra_edit(code);
-        }
         match code {
             KeyCode::Esc => LaunchPickerOutcome::Cancel,
-            KeyCode::Tab => {
-                self.extra_editing = true;
-                self.extra_cursor = self.extra_args.chars().count();
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.toggle_target();
                 LaunchPickerOutcome::Continue
             }
             KeyCode::Enter | KeyCode::Char('o') => self.launch_outcome(),
@@ -336,106 +290,6 @@ impl ProviderLaunchState {
             self.reasoning_idx = (self.reasoning_idx + 1) % REASONING_CHOICES.len();
         }
     }
-
-    fn handle_extra_edit(&mut self, code: KeyCode) -> LaunchPickerOutcome {
-        match code {
-            KeyCode::Esc | KeyCode::Tab => {
-                self.extra_editing = false;
-                LaunchPickerOutcome::Continue
-            }
-            KeyCode::Enter => self.launch_outcome(),
-            KeyCode::Backspace if self.extra_cursor > 0 => {
-                self.extra_cursor -= 1;
-                let mut chars: Vec<char> = self.extra_args.chars().collect();
-                chars.remove(self.extra_cursor);
-                self.extra_args = chars.into_iter().collect();
-                self.extra_error = None;
-                LaunchPickerOutcome::Continue
-            }
-            KeyCode::Delete => {
-                let mut chars: Vec<char> = self.extra_args.chars().collect();
-                if self.extra_cursor < chars.len() {
-                    chars.remove(self.extra_cursor);
-                    self.extra_args = chars.into_iter().collect();
-                    self.extra_error = None;
-                }
-                LaunchPickerOutcome::Continue
-            }
-            KeyCode::Left if self.extra_cursor > 0 => {
-                self.extra_cursor -= 1;
-                LaunchPickerOutcome::Continue
-            }
-            KeyCode::Right => {
-                if self.extra_cursor < self.extra_args.chars().count() {
-                    self.extra_cursor += 1;
-                }
-                LaunchPickerOutcome::Continue
-            }
-            KeyCode::Char(c) if !c.is_control() => {
-                let mut chars: Vec<char> = self.extra_args.chars().collect();
-                chars.insert(self.extra_cursor, c);
-                self.extra_args = chars.into_iter().collect();
-                self.extra_error = None;
-                self.extra_cursor += 1;
-                LaunchPickerOutcome::Continue
-            }
-            _ => LaunchPickerOutcome::Continue,
-        }
-    }
-}
-
-/// Parse the TUI's portable argument syntax without applying shell expansion.
-/// Backslashes always remain literal; use JSON to include quote characters.
-fn parse_extra_args(input: &str) -> Result<Vec<String>, String> {
-    let input = input.trim();
-    if input.is_empty() {
-        return Ok(Vec::new());
-    }
-    if input.starts_with('[') {
-        let args: Vec<String> = serde_json::from_str(input)
-            .map_err(|error| format!("invalid JSON argument array: {error}"))?;
-        if args.iter().any(|arg| arg.contains('\0')) {
-            return Err("arguments cannot contain NUL characters".into());
-        }
-        return Ok(args);
-    }
-
-    let mut args = Vec::new();
-    let mut token = String::new();
-    let mut quote = None;
-    let mut started = false;
-    for ch in input.chars() {
-        if ch == '\0' {
-            return Err("arguments cannot contain NUL characters".into());
-        }
-        if let Some(active_quote) = quote {
-            if ch == active_quote {
-                quote = None;
-                started = true;
-            } else {
-                token.push(ch);
-                started = true;
-            }
-        } else if ch == '\'' || ch == '"' {
-            quote = Some(ch);
-            started = true;
-        } else if ch.is_whitespace() {
-            if started {
-                args.push(std::mem::take(&mut token));
-                started = false;
-            }
-        } else {
-            token.push(ch);
-            started = true;
-        }
-    }
-    if quote.is_some() {
-        return Err("unclosed quote in extra arguments".into());
-    }
-    if started {
-        args.push(token);
-    }
-    Ok(args)
 }
 
 pub fn render_provider_launch(
@@ -451,12 +305,12 @@ pub fn render_provider_launch(
         LaunchKind::Provider => (
             "Provider  ",
             "Launch provider",
-            "Reasoning is launch-only; args accept quotes or JSON (for literal quotes).",
+            "Choose a model and launch target.",
         ),
         LaunchKind::Account => (
             "Account   ",
             "Launch account",
-            "Pick a Codex model/default. Args accept quotes or JSON (for literal quotes).",
+            "Choose a Codex model or use the default.",
         ),
     };
     lines.push(Line::from(vec![
@@ -464,6 +318,12 @@ pub fn render_provider_launch(
         Span::styled(state.alias.clone(), header()),
     ]));
     hits.push(None);
+    lines.push(Line::from(vec![
+        Span::styled("Tab       ", dim()),
+        Span::styled(state.target.label(), header()),
+        Span::styled("   (switch Desktop / CLI)", dim()),
+    ]));
+    hits.push(Some(OverlayClick::LaunchTarget));
     lines.push(Line::from(Span::styled(hint, dim())));
     hits.push(None);
     lines.push(Line::from(""));
@@ -499,30 +359,6 @@ pub fn render_provider_launch(
         Span::styled("   (this session)", dim()),
     ]));
     hits.push(Some(OverlayClick::LaunchReasoning));
-    let extra_shown = if state.extra_editing {
-        let mut shown = state.extra_args.clone();
-        let byte = shown
-            .char_indices()
-            .nth(state.extra_cursor)
-            .map(|(i, _)| i)
-            .unwrap_or(shown.len());
-        shown.insert(byte, '#');
-        shown
-    } else if state.extra_args.is_empty() {
-        "(none)".to_string()
-    } else {
-        state.extra_args.clone()
-    };
-    lines.push(Line::from(vec![
-        Span::styled("args       ", dim()),
-        Span::styled(extra_shown, header()),
-        Span::styled("   (this session)", dim()),
-    ]));
-    hits.push(Some(OverlayClick::LaunchArgs));
-    if let Some(error) = &state.extra_error {
-        lines.push(Line::from(Span::styled(error.clone(), base().fg(C_RED))));
-        hits.push(None);
-    }
     lines.push(Line::from(""));
     hits.push(None);
     lines.push(Line::from(vec![
@@ -531,7 +367,7 @@ pub fn render_provider_launch(
         Span::styled("←/→", key()),
         Span::styled(" reasoning  ", dim()),
         Span::styled("tab", key()),
-        Span::styled(" args  ", dim()),
+        Span::styled(" Desktop/CLI  ", dim()),
         Span::styled("enter/o", key()),
         Span::styled(" launch  ", dim()),
         Span::styled("esc", key()),
@@ -589,7 +425,7 @@ mod tests {
             alias,
             model,
             reasoning,
-            extra_args,
+            target,
         } = picker.handle_key(KeyCode::Enter)
         else {
             panic!("enter should launch");
@@ -598,7 +434,7 @@ mod tests {
         assert_eq!(model, "liquid/lfm-2.5-2.6b:free");
         // saved high (index of "high") then one Right → xhigh
         assert_eq!(reasoning, ReasoningLaunch::Effort("xhigh".into()));
-        assert!(extra_args.is_empty());
+        assert_eq!(target, crate::desktop::LaunchTarget::Desktop);
     }
 
     #[test]
@@ -611,10 +447,7 @@ mod tests {
         let mut picker = ProviderLaunchState::from_chatgpt("work", &initial);
         picker.handle_key(KeyCode::Down);
         picker.handle_key(KeyCode::Right);
-        picker.extra_args = "--cd D:\\My Work".into();
-        picker.extra_editing = true;
-        picker.extra_cursor = 6;
-        picker.extra_error = Some("keep editing".into());
+        picker.handle_key(KeyCode::Tab);
         picker.popup.scroll = 3;
 
         let updated = [
@@ -628,10 +461,7 @@ mod tests {
 
         assert_eq!(picker.models[picker.selected].id, "existing-model");
         assert_eq!(picker.reasoning_label(), "xhigh");
-        assert_eq!(picker.extra_args, "--cd D:\\My Work");
-        assert!(picker.extra_editing);
-        assert_eq!(picker.extra_cursor, 6);
-        assert_eq!(picker.extra_error.as_deref(), Some("keep editing"));
+        assert_eq!(picker.target, crate::desktop::LaunchTarget::Cli);
         assert_eq!(picker.popup.scroll, 3);
         assert!(picker.models.iter().any(|model| model.id == "gpt-6.1-sol"));
     }
@@ -767,7 +597,7 @@ mod tests {
             alias,
             model,
             reasoning,
-            extra_args,
+            target,
         } = picker.handle_key(KeyCode::Enter)
         else {
             panic!("enter should launch");
@@ -775,7 +605,7 @@ mod tests {
         assert_eq!(alias, "work");
         assert!(model.is_empty());
         assert_eq!(reasoning, ReasoningLaunch::Skip);
-        assert!(extra_args.is_empty());
+        assert_eq!(target, crate::desktop::LaunchTarget::Desktop);
     }
 
     #[test]
@@ -816,103 +646,12 @@ mod tests {
     }
 
     #[test]
-    fn picker_tab_edits_extra_args_for_this_launch() {
-        let mut picker = ProviderLaunchState::from_profile(&profile());
-        assert!(matches!(
-            picker.handle_key(KeyCode::Tab),
-            LaunchPickerOutcome::Continue
-        ));
-        for c in "exec --json hi".chars() {
-            picker.handle_key(KeyCode::Char(c));
-        }
-        let LaunchPickerOutcome::Launch { extra_args, .. } = picker.handle_key(KeyCode::Enter)
-        else {
-            panic!("enter should launch");
-        };
-        assert_eq!(extra_args, ["exec", "--json", "hi"]);
-    }
-
-    #[test]
-    fn picker_preserves_windows_paths_and_quoted_argument_boundaries() {
-        let mut picker = ProviderLaunchState::from_profile(&profile());
-        picker.extra_args = r#"--cd "D:\My Work" --network "\\server\share" --tail "C:\path with spaces\" --label 'two words'"#.into();
-        let LaunchPickerOutcome::Launch { extra_args, .. } = picker.handle_key(KeyCode::Enter)
-        else {
-            panic!("valid quoted args should launch");
-        };
-        assert_eq!(
-            extra_args,
-            [
-                "--cd",
-                r"D:\My Work",
-                "--network",
-                r"\\server\share",
-                "--tail",
-                r"C:\path with spaces\",
-                "--label",
-                "two words"
-            ]
-        );
-    }
-
-    #[test]
-    fn picker_accepts_json_array_and_refuses_invalid_input_without_losing_it() {
-        let mut picker = ProviderLaunchState::from_profile(&profile());
-        picker.extra_args = r#"["--cd","D:\\My Work","--label","a \"quoted\" value"]"#.into();
-        let LaunchPickerOutcome::Launch { extra_args, .. } = picker.handle_key(KeyCode::Enter)
-        else {
-            panic!("valid JSON args should launch");
-        };
-        assert_eq!(
-            extra_args,
-            ["--cd", r"D:\My Work", "--label", "a \"quoted\" value"]
-        );
-
-        picker.extra_args = "[\"unfinished\"] trailing".into();
-        assert!(matches!(
-            picker.handle_key(KeyCode::Enter),
-            LaunchPickerOutcome::Continue
-        ));
-        assert_eq!(picker.extra_args, "[\"unfinished\"] trailing");
-        assert!(
-            picker
-                .extra_error
-                .as_deref()
-                .is_some_and(|error| error.contains("JSON"))
-        );
-        let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
-        terminal
-            .draw(|frame| {
-                super::render_provider_launch(
-                    frame,
-                    &mut picker,
-                    frame.area(),
-                    &mut crate::tui::hitmap::HitMap::default(),
-                )
-            })
-            .unwrap();
-        let joined = (0..20)
-            .map(|y| row_text(terminal.backend(), y))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(joined.contains("invalid JSON argument array"), "{joined}");
-
-        picker.extra_args = r#"--cd "D:\My Work" --label 'unfinished"#.into();
-        assert!(matches!(
-            picker.handle_key(KeyCode::Enter),
-            LaunchPickerOutcome::Continue
-        ));
-        assert_eq!(
-            picker.extra_args,
-            r#"--cd "D:\My Work" --label 'unfinished"#
-        );
-        assert!(
-            picker
-                .extra_error
-                .as_deref()
-                .is_some_and(|error| error.contains("unclosed"))
-        );
-        assert!(picker.extra_editing);
+    fn picker_tab_toggles_target_without_launching() {
+        let mut picker = ProviderLaunchState::from_chatgpt("work", &[]);
+        picker.handle_key(KeyCode::Tab);
+        assert_eq!(picker.target, crate::desktop::LaunchTarget::Cli);
+        picker.handle_key(KeyCode::BackTab);
+        assert_eq!(picker.target, crate::desktop::LaunchTarget::Desktop);
     }
 
     #[test]

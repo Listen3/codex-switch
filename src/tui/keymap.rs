@@ -192,7 +192,7 @@ pub const KEYMAP: &[Binding] = &[
     Binding {
         keys: "enter / o",
         section: Section::Provider,
-        label: "launch Codex (pick model, reasoning, extra args)",
+        label: "launch Codex (model, reasoning, Desktop/CLI)",
         in_status_bar: false,
     },
     Binding {

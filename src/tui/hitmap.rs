@@ -61,7 +61,7 @@ pub enum OverlayClick {
     ProviderPickFilter,
     LaunchModel(usize),
     LaunchReasoning,
-    LaunchArgs,
+    LaunchTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,9 +98,9 @@ impl HitMap {
     }
 
     pub fn group_tab_at(&self, column: u16, row: u16) -> Option<Option<String>> {
-        self.group_tabs.iter().find_map(|(rect, group)| {
-            Self::contains(*rect, column, row).then(|| group.clone())
-        })
+        self.group_tabs
+            .iter()
+            .find_map(|(rect, group)| Self::contains(*rect, column, row).then(|| group.clone()))
     }
 
     pub fn tab_at(&self, column: u16, row: u16) -> Option<Tab> {

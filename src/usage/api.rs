@@ -629,6 +629,7 @@ pub(crate) async fn refresh_profile_tokens(
     profile_path: &Path,
     expected: &ProfileTokens,
 ) -> Result<ProfileTokens> {
+    crate::desktop::sync_account_profile(alias, profile_path);
     let (current_auth, current) = read_profile_tokens(profile_path)?;
     ensure_profile_identity(alias, expected, &current)?;
     if profile_tokens_changed(&current, expected) {
@@ -758,6 +759,7 @@ async fn fetch_usage_retried_inner(
     })?;
 
     let profile_read_started = Instant::now();
+    crate::desktop::sync_account_profile(alias, profile_path);
     let profile_result = auth::read_auth(profile_path);
     log_local_phase(
         alias,
@@ -1792,6 +1794,9 @@ mod tests {
             .with_ansi(false)
             .without_time()
             .finish();
+        // Keep two dispatchers registered so callsites first used by another
+        // test thread are evaluated against this subscriber as well.
+        let _parallel = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
         let _guard = tracing::subscriber::set_default(subscriber);
         let response = send_usage_request(
             "private@example.invalid",

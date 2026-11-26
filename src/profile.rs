@@ -142,12 +142,12 @@ pub fn lock_reset_card_consume(profile_path: &Path) -> Result<File> {
     )
 }
 
-struct AuthTransaction {
+pub(crate) struct AuthTransaction {
     _launch: File,
     _auth: File,
 }
 
-fn lock_auth_transaction() -> Result<AuthTransaction> {
+pub(crate) fn lock_auth_transaction() -> Result<AuthTransaction> {
     lock_auth_transaction_after_launch(|| {})
 }
 
@@ -206,6 +206,8 @@ fn acquire_file_lock(path: &Path, timeout: Duration, label: &str) -> Result<File
 
 #[cfg(test)]
 thread_local! {
+    // Clippy also checks the Windows expansion of this already-const initializer.
+    #[allow(clippy::missing_const_for_thread_local)]
     static TEST_LOCK_ATTEMPT_NOTIFIER:
         std::cell::RefCell<Option<(String, std::sync::mpsc::Sender<()>)>> =
         const { std::cell::RefCell::new(None) };
@@ -448,9 +450,26 @@ fn update_profile_tokens_if_refresh_matches_after_launch(
     new_refresh_token: &str,
     after_launch: impl FnOnce(),
 ) -> Result<bool> {
+    let _transaction = lock_auth_transaction_after_launch(after_launch)?;
+    update_profile_tokens_locked(
+        alias,
+        presented_refresh_token,
+        id_token,
+        access_token,
+        new_refresh_token,
+    )
+}
+
+/// Persist a token rotation with the launch and auth locks already held.
+pub(crate) fn update_profile_tokens_locked(
+    alias: &str,
+    presented_refresh_token: &str,
+    id_token: &str,
+    access_token: &str,
+    new_refresh_token: &str,
+) -> Result<bool> {
     validate_alias(alias)?;
     let profile_path = profile_auth_path(alias)?;
-    let _transaction = lock_auth_transaction_after_launch(after_launch)?;
     let profile = read_auth(&profile_path)?;
     if refresh_token(&profile) != Some(presented_refresh_token) {
         return Ok(false);
@@ -909,6 +928,18 @@ fn refresh_token(val: &serde_json::Value) -> Option<&str> {
     val.get("tokens")?.get("refresh_token")?.as_str()
 }
 
+pub(crate) fn is_newer_desktop_auth(
+    alias: &str,
+    saved: &serde_json::Value,
+    incoming: &serde_json::Value,
+) -> bool {
+    incoming.get("tokens") != saved.get("tokens")
+        && extract_identity(saved).account_id == extract_identity(incoming).account_id
+        && ensure_same_account_identity(alias, saved, incoming).is_ok()
+        && parse_last_refresh(incoming)
+            .is_some_and(|incoming| parse_last_refresh(saved).is_none_or(|saved| incoming > saved))
+}
+
 /// How an auth.json's `last_refresh` looks to the rollback guard, phrased for
 /// the user: a refusal has to say what each side actually carried, otherwise
 /// "cannot be ordered" is unactionable.
@@ -1227,6 +1258,7 @@ pub fn cmd_use(alias: &str, allow_prompt: bool) -> Result<()> {
     if !src.exists() {
         return Err(CsError::NotFound(alias.to_string()).into());
     }
+    crate::desktop::sync_account_profile(alias, &src);
 
     let dst = codex_auth_path()?;
 
@@ -1301,6 +1333,7 @@ pub fn cmd_delete(alias: &str) -> Result<()> {
     if read_current() == alias {
         return Err(CsError::ActiveProfileDelete(alias.to_string()).into());
     }
+    crate::desktop::ensure_window_closed(&dir, alias)?;
     let deleted_dir = deleted_profiles_dir()?;
     ensure_private_dir(&deleted_dir)?;
     let timestamp = SystemTime::now()
@@ -1489,6 +1522,7 @@ pub fn rename_profile(old_alias: &str, new_alias: &str) -> Result<()> {
         anyhow::bail!("profile '{new_alias}' already exists");
     }
     let _transaction = lock_auth_transaction()?;
+    crate::desktop::ensure_window_closed(&old_dir, old_alias)?;
     std::fs::rename(&old_dir, &new_dir).with_context(|| {
         format!(
             "renaming profile {} -> {}",
@@ -3254,6 +3288,45 @@ mod tests {
         .unwrap();
         assert!(written);
         assert_eq!(profile_refresh_token("alice"), "fresh_refresh");
+    }
+
+    #[test]
+    fn desktop_reconciles_rotations_without_adopting_logout_or_account_changes() {
+        let _env = TestEnv::new();
+        let alias = "alice";
+        let saved_path = super::profile_auth_path(alias).unwrap();
+        let mut saved = realistic_auth_json("alice@example.com", "acct_a", "at", "rt");
+        saved["last_refresh"] = serde_json::json!("2026-01-01T00:00:00Z");
+        seed_profile(alias, &saved);
+        let parent = saved_path.parent().unwrap();
+        let first = parent.join("desktop-window-1/codex-home");
+        let second = parent.join("desktop-window-2/codex-home");
+        for window in [&first, &second] {
+            crate::auth::write_auth(&window.join("auth.json"), &saved).unwrap();
+            crate::desktop::write_token_marker(window, Some("rt")).unwrap();
+        }
+        std::fs::remove_file(first.join("auth.json")).unwrap();
+        let mut switched =
+            realistic_auth_json("other@example.com", "acct_a", "other-at", "other-rt");
+        switched["last_refresh"] = serde_json::json!("2026-01-02T00:00:00Z");
+        crate::auth::write_auth(&second.join("auth.json"), &switched).unwrap();
+        crate::desktop::sync_account_profile(alias, &saved_path);
+        assert_eq!(profile_refresh_token(alias), "rt");
+
+        let mut rotated = saved.clone();
+        rotated["last_refresh"] = serde_json::json!("2026-01-02T00:00:00Z");
+        rotated["tokens"]["refresh_token"] = serde_json::json!("new-rt");
+        crate::auth::write_auth(&second.join("auth.json"), &rotated).unwrap();
+        crate::desktop::sync_account_profile(alias, &saved_path);
+        assert_eq!(profile_refresh_token(alias), "new-rt");
+
+        // Even a later timestamp from an old window must not undo that rotation.
+        let mut stale = rotated;
+        stale["last_refresh"] = serde_json::json!("2099-01-01T00:00:00Z");
+        stale["tokens"]["refresh_token"] = serde_json::json!("stale-rt");
+        crate::auth::write_auth(&first.join("auth.json"), &stale).unwrap();
+        crate::desktop::sync_account_profile(alias, &saved_path);
+        assert_eq!(profile_refresh_token(alias), "new-rt");
     }
 
     #[test]

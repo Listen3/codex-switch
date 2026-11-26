@@ -78,7 +78,7 @@ On Windows the private-write path reads a directory's protected ACL first and re
 
 `launch` selects or stages a profile, starts Codex, then restores the previous live authentication after the configured compatibility delay:
 
-In the TUI Accounts page or account menu, `o` opens the same launch picker used by providers. `(Codex default)` adds no model or reasoning override; cached account models can supply a one-shot model and reasoning effort, and the picker also accepts extra Codex arguments.
+In the TUI Accounts page or account menu, `o` opens the same launch picker used by providers. `(Codex default)` adds no model or reasoning override; cached account models can supply a one-shot model and reasoning effort. Tab switches between Desktop and CLI. Each account remembers its most recent launch target, initially Desktop.
 
 ```bash
 codex-switch launch work -- --model gpt-5.4
@@ -104,7 +104,7 @@ codex-switch launch openrouter
 
 `launch <provider>` does not swap `$CODEX_HOME/auth.json`. It starts Codex with a native per-run profile in the shared Codex home, injects the key into the child environment, and keeps launch metadata/catalogs under `provider-runs/<identity_id>/<run_id>`. MCP servers, skills, plugins, hooks and session storage remain shared; concurrent launches have separate model/provider configuration. Provider `resume` resolves IDs, unique names, `--last`, and the bare picker within the selected provider identity and passes the exact session ID to Codex. Auto-select (`launch` with no alias) and `use` remain ChatGPT-only. Launch performs no gateway request unless a saved probe marked the chosen model unsupported. `codex-switch provider probe <alias>` explicitly checks `POST /responses`; verdicts are kept for 7 days, and only a live re-probe at launch that still reports the model unsupported can block it (a supported answer proceeds and refreshes the record; an inconclusive answer or network failure proceeds with a stderr warning and drops the record).
 
-A provider holds several models; reasoning effort and `web_search` are per model. In the TUI Providers tab, `Enter` / `o` opens a picker for a saved model, a one-shot reasoning override, and optional extra Codex argv; `e` edits the provider (including env key, wire API, and extra `-c`). The API key is read from a hidden prompt (or `--api-key-stdin`), never from argv. Full workflow, DeepSeek-via-OpenRouter, model-specific settings, TUI add/edit/rename, and the security contract are in [Custom API providers](Providers).
+A provider holds several models; reasoning effort and `web_search` are per model. In the TUI Providers tab, `Enter` / `o` opens a picker for a saved model, a one-shot reasoning override, and the Desktop or CLI target; `e` edits the provider (including env key, wire API, and extra `-c`). The API key is read from a hidden prompt (or `--api-key-stdin`), never from argv. Full workflow, DeepSeek-via-OpenRouter, model-specific settings, TUI add/edit/rename, and the security contract are in [Custom API providers](Providers).
 
 ## Recover exhausted accounts
 

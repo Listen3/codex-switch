@@ -152,14 +152,18 @@ pub fn phrase(language: Language, english: &'static str) -> &'static str {
         "re-login (in the Enter menu)" => "重新登录（在菜单中）",
         "rename (in the Enter menu)" => "重命名（在菜单中）",
         "warmup (in the Enter menu)" => "预热（在菜单中）",
-        "use earliest reset card, asks to confirm (in the Enter menu)" => "使用最早到期的重置卡（会确认）",
+        "use earliest reset card, asks to confirm (in the Enter menu)" => {
+            "使用最早到期的重置卡（会确认）"
+        }
         "delete (in the Enter menu)" => "删除（在菜单中）",
         "refresh selected" => "刷新已选",
         "warmup selected" => "预热已选",
         "re-login selected (sequential)" => "依次重新登录已选",
         "delete selected" => "删除已选",
         "move provider selection" => "移动提供方选择",
-        "launch Codex (pick model, reasoning, extra args)" => "启动 Codex（选择模型、思考等级和额外参数）",
+        "launch Codex (model, reasoning, Desktop/CLI)" => {
+            "启动 Codex（选择模型、思考等级和桌面端/CLI）"
+        }
         "edit provider" => "编辑提供方",
         "rename provider" => "重命名提供方",
         "add provider" => "添加提供方",
@@ -177,8 +181,12 @@ pub fn phrase(language: Language, english: &'static str) -> &'static str {
         "choose groups to download" => "选择要下载的分组",
         "choose groups to upload" => "选择要上传的分组",
         "toggle auto-refresh" => "开关自动刷新",
-        "click tabs/rows; double-click rows opens menus; wheel scrolls logs/help/menus" => "点击页签和行；双击行打开菜单；滚轮滚动日志、帮助和菜单",
-        "next / previous tab (Accounts / Providers / Settings / Logs)" => "下一个 / 上一个页（账号 / 提供方 / 设置 / 日志）",
+        "click tabs/rows; double-click rows opens menus; wheel scrolls logs/help/menus" => {
+            "点击页签和行；双击行打开菜单；滚轮滚动日志、帮助和菜单"
+        }
+        "next / previous tab (Accounts / Providers / Settings / Logs)" => {
+            "下一个 / 上一个页（账号 / 提供方 / 设置 / 日志）"
+        }
         "Navigation" => "导航",
         "Selection" => "选择",
         "Accounts tab" => "账号页",
@@ -209,7 +217,12 @@ pub fn pushed(language: Language, group: &str, count: usize) -> String {
     }
 }
 
-pub fn uploaded(language: Language, groups: usize, accounts: usize, removed_remote: usize) -> String {
+pub fn uploaded(
+    language: Language,
+    groups: usize,
+    accounts: usize,
+    removed_remote: usize,
+) -> String {
     match language {
         Language::En => {
             let mut message = format!(
@@ -294,7 +307,13 @@ pub fn no_remote_groups(language: Language) -> String {
     }
 }
 
-pub fn pulled(language: Language, group: &str, created: usize, updated: usize, skipped: usize) -> String {
+pub fn pulled(
+    language: Language,
+    group: &str,
+    created: usize,
+    updated: usize,
+    skipped: usize,
+) -> String {
     match language {
         Language::En => {
             let mut message =
@@ -305,7 +324,8 @@ pub fn pulled(language: Language, group: &str, created: usize, updated: usize, s
             message
         }
         Language::Zh => {
-            let mut message = format!("已拉取分组 {group}，新增 {created} 个账号，更新 {updated} 个。");
+            let mut message =
+                format!("已拉取分组 {group}，新增 {created} 个账号，更新 {updated} 个。");
             if skipped > 0 {
                 message.push_str(&format!(" 跳过 {skipped} 个。"));
             }

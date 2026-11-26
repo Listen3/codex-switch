@@ -102,7 +102,8 @@ fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], rounds: u32, out: &mut [u8; 
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     use hmac::{KeyInit, Mac};
-    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("hmac-sha256 accepts any key length");
+    let mut mac =
+        <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("hmac-sha256 accepts any key length");
     mac.update(data);
     mac.finalize().into_bytes().into()
 }

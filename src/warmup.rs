@@ -816,7 +816,10 @@ pub async fn warmup_account(alias: &str, profile_path: &Path) -> Result<WarmupOu
 /// Same as [`warmup_account`], but a 7-day-only account is warmed too.
 ///
 /// Used when a weekly window has just reset and there is no 5h window to open.
-pub async fn warmup_account_after_window(alias: &str, profile_path: &Path) -> Result<WarmupOutcome> {
+pub async fn warmup_account_after_window(
+    alias: &str,
+    profile_path: &Path,
+) -> Result<WarmupOutcome> {
     warmup_account_inner(alias, profile_path, true).await
 }
 

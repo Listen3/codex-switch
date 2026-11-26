@@ -41,10 +41,14 @@ codex-switch launch       # 用最佳账号启动 Codex
 
 ![TUI](docs/tui.png)
 
+在终端界面选中账号后按 `o` 打开启动弹窗。按 **Tab** 切换 **Desktop / CLI**，按 **Enter** 启动。首次默认 Desktop，之后记住每个账号最近一次启动的方式。自定义提供商使用同一个弹窗。
+
+桌面启动使用已安装的 Codex 或 ChatGPT 桌面程序。每个账号或提供商最多运行一个桌面实例，重复启动会把已有窗口带到前台。不同账号可以同时运行，各自使用独立的本地配置和界面数据。重命名或删除配置前，请先退出对应的桌面应用。退出应用会保留登录会话，在桌面端主动退出登录可能撤销账号库共用的令牌。自定义安装位置可以用 `CODEX_SWITCH_DESKTOP_PATH` 指定。直接在命令行运行 `codex-switch launch work -- <args>` 会启动 CLI 并透传参数。
+
 ## 功能一览
 
 - 保存、导入、重命名、切换和可恢复地删除 Codex 账号。
-- **Beta：自定义 API 提供方。** 保存兼容 Responses 协议的端点和 API 密钥，为每个端点配置多个模型及各自的思考等级、`web_search`，获取网关模型目录并启动 Codex。兼容性取决于网关和具体模型；提供方不展示 ChatGPT 额度，也不参与自动选号。TUI Providers 页可用同一张表单新增/编辑（`a` / `e`），按 `Enter` / `o` 启动 Codex；启动使用 Codex 原生的每次运行独立 profile（`$CODEX_HOME` 中的 `cs-*.config.toml`），共享认证与 ChatGPT 配置保持不变：
+- **Beta：自定义 API 提供方。** 保存兼容 Responses 协议的端点和 API 密钥，为每个端点配置多个模型及各自的思考等级、`web_search`，获取网关模型目录并启动 Codex。兼容性取决于网关和具体模型；提供方不展示 ChatGPT 额度，也不参与自动选号。TUI Providers 页可用同一张表单新增/编辑（`a` / `e`），按 `Enter` / `o` 启动 Codex；CLI 启动使用 Codex 原生的每次运行独立 profile（`$CODEX_HOME` 中的 `cs-*.config.toml`），共享认证与 ChatGPT 配置保持不变：
 
   ```bash
   codex-switch provider add openrouter \

@@ -165,18 +165,12 @@ impl Default for LaunchConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WarmupConfig {
     /// Warm an account one minute after its 5h or 7d window resets.
     /// Only runs while the TUI is open.
     pub auto: bool,
-}
-
-impl Default for WarmupConfig {
-    fn default() -> Self {
-        Self { auto: false }
-    }
 }
 
 pub fn config_path() -> anyhow::Result<PathBuf> {

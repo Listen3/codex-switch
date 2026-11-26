@@ -141,7 +141,7 @@ fn providers_dir() -> Result<PathBuf> {
     Ok(auth::app_home()?.join("providers"))
 }
 
-fn provider_dir(alias: &str) -> Result<PathBuf> {
+pub(crate) fn provider_dir(alias: &str) -> Result<PathBuf> {
     crate::profile::validate_alias(alias)?;
     Ok(providers_dir()?.join(alias))
 }
@@ -1112,7 +1112,7 @@ fn string_table(value: Option<&toml::Value>, field: &str) -> Result<BTreeMap<Str
         .collect()
 }
 
-fn provider_override_value(raw: &str) -> toml::Value {
+pub(crate) fn provider_override_value(raw: &str) -> toml::Value {
     toml::from_str::<toml::Value>(&format!("value = {raw}"))
         .ok()
         .and_then(|value| value.get("value").cloned())
@@ -3284,7 +3284,7 @@ fn provider_profile_overrides(
     Ok(result)
 }
 
-fn insert_toml_override(
+pub(crate) fn insert_toml_override(
     table: &mut toml::map::Map<String, toml::Value>,
     dotted_key: &str,
     value: toml::Value,
@@ -4174,10 +4174,7 @@ fn native_run_is_dead(meta: &ProviderRunMeta, scan: &LiveRuntimeScan) -> bool {
     let Some(runtime_id) = meta.runtime_provider_id.as_deref() else {
         return false;
     };
-    if scan.incomplete || scan.ids.contains(runtime_id) {
-        return false;
-    }
-    true
+    !scan.incomplete && !scan.ids.contains(runtime_id)
 }
 
 fn delete_native_profile_file(meta: &ProviderRunMeta) {
@@ -4673,8 +4670,10 @@ fn provider_has_live_runs(identity_id: &str) -> Result<bool> {
 
 /// Remove a provider profile and its stored key.
 pub fn remove(alias: &str) -> Result<()> {
+    let _transaction = crate::profile::lock_auth_transaction()?;
     let profile = load(alias)?;
     let dir = existing_provider_dir(alias)?;
+    crate::desktop::ensure_window_closed(&dir.join("desktop-home"), alias)?;
     if provider_has_live_runs(&profile.identity_id)? {
         anyhow::bail!(
             "provider '{alias}' still has a running Codex session; remove it after that Codex exits"
@@ -4708,6 +4707,7 @@ pub fn rename(old: &str, new: &str) -> Result<()> {
     if old == new {
         return Ok(());
     }
+    let _transaction = crate::profile::lock_auth_transaction()?;
     if !exists(old) {
         anyhow::bail!("provider '{old}' not found");
     }
@@ -4720,6 +4720,7 @@ pub fn rename(old: &str, new: &str) -> Result<()> {
     let mut profile = load(old)?;
     let old_dir = existing_provider_dir(old)?;
     let new_dir = provider_dir(new)?;
+    crate::desktop::ensure_window_closed(&old_dir.join("desktop-home"), old)?;
     std::fs::rename(&old_dir, &new_dir).with_context(|| {
         format!(
             "renaming provider {} -> {}",

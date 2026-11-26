@@ -140,6 +140,16 @@ pub async fn run_cli() {
     }
     config::set_cli_proxy(cli.proxy.clone());
 
+    if matches!(
+        &cli.command,
+        Commands::Tui
+            | Commands::Use { .. }
+            | Commands::Launch { .. }
+            | Commands::List { .. }
+            | Commands::Warmup { .. }
+    ) {
+        crate::desktop::sync_profiles();
+    }
     let result = dispatch(cli.command, use_json, launch_passthrough).await;
 
     if let Err(e) = result {

@@ -124,7 +124,11 @@ pub fn default_group_name() -> String {
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_default();
     let name = sanitize_group_name(&user);
-    if name.is_empty() { "computer".to_string() } else { name }
+    if name.is_empty() {
+        "computer".to_string()
+    } else {
+        name
+    }
 }
 
 pub fn load() -> SyncSettings {
@@ -192,7 +196,10 @@ pub fn local_group_names(default_group: &str) -> Result<Vec<String>> {
     for alias in aliases {
         names.insert(group_for(&alias, &index, default_group));
     }
-    let mut ordered: Vec<String> = names.into_iter().filter(|name| name != default_group).collect();
+    let mut ordered: Vec<String> = names
+        .into_iter()
+        .filter(|name| name != default_group)
+        .collect();
     ordered.insert(0, default_group.to_string());
     Ok(ordered)
 }
@@ -293,7 +300,10 @@ pub async fn pull_groups(
         };
         let document = open_group(&body, settings, language)?;
         if document.schema != 1 && document.schema != 2 {
-            anyhow::bail!(crate::tui::locale::unknown_schema(language, document.schema));
+            anyhow::bail!(crate::tui::locale::unknown_schema(
+                language,
+                document.schema
+            ));
         }
         let counts = replace_local_group(group, &settings.group_name, &document)?;
         created += counts.created;
@@ -307,20 +317,13 @@ pub async fn pull_groups(
         anyhow::bail!(crate::tui::locale::no_remote_groups(language));
     }
     Ok(crate::tui::locale::downloaded(
-        language,
-        found,
-        created,
-        updated,
-        removed,
-        renamed,
-        skipped,
+        language, found, created, updated, removed, renamed, skipped,
     ))
 }
 
 fn sync_secret(settings: &SyncSettings, language: crate::config::Language) -> Result<String> {
-    remote_store::access_secret(&settings.redis_url, &settings.password).ok_or_else(|| {
-        anyhow::anyhow!(crate::tui::locale::sync_password_required(language))
-    })
+    remote_store::access_secret(&settings.redis_url, &settings.password)
+        .ok_or_else(|| anyhow::anyhow!(crate::tui::locale::sync_password_required(language)))
 }
 
 fn open_group(
@@ -330,7 +333,10 @@ fn open_group(
 ) -> Result<GroupDocument> {
     let value: serde_json::Value =
         serde_json::from_str(body).context("unrecognized group document")?;
-    let schema = value.get("schema").and_then(|item| item.as_u64()).unwrap_or(0);
+    let schema = value
+        .get("schema")
+        .and_then(|item| item.as_u64())
+        .unwrap_or(0);
     if schema == 3 {
         let secret = sync_secret(settings, language)?;
         let plain = crate::sync_seal::open(&secret, body)
@@ -403,7 +409,10 @@ fn proven_different_account(alias: &str, incoming: &serde_json::Value) -> bool {
     };
     let existing = crate::profile::extract_identity(&existing);
     let incoming = crate::profile::extract_identity(incoming);
-    match (existing.account_id.as_deref(), incoming.account_id.as_deref()) {
+    match (
+        existing.account_id.as_deref(),
+        incoming.account_id.as_deref(),
+    ) {
         (Some(left), Some(right)) => left != right,
         _ => match (existing.email.as_deref(), incoming.email.as_deref()) {
             (Some(left), Some(right)) => !left.eq_ignore_ascii_case(right),
@@ -543,8 +552,8 @@ struct GroupIndex {
 
 fn read_index() -> Result<GroupIndex> {
     let path = index_path()?;
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&raw).context("parsing sync groups")
 }
 
@@ -583,9 +592,7 @@ fn apply_provider(snapshot: ProviderSnapshot, language: crate::config::Language)
         snapshot.models,
         snapshot.api_key,
     );
-    if !created
-        && let Ok(existing) = crate::provider::load(&profile.alias)
-    {
+    if !created && let Ok(existing) = crate::provider::load(&profile.alias) {
         profile.identity_id = existing.identity_id;
     } else if !snapshot.identity_id.trim().is_empty() {
         profile.identity_id = snapshot.identity_id;
@@ -631,8 +638,8 @@ struct StoredSettings {
 
 fn read_settings() -> Result<SyncSettings> {
     let path = settings_path()?;
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let stored: StoredSettings = toml::from_str(&raw).context("parsing sync settings")?;
     Ok(SyncSettings {
         group_name: stored.group_name,
@@ -715,7 +722,10 @@ mod tests {
     fn group_name_uses_the_computer_name_instead_of_this_pc() {
         assert_ne!(default_group_name(), "this-pc");
         assert!(crate::profile::validate_alias(&default_group_name()).is_ok());
-        assert_eq!(sanitize_group_name("Listen's MacBook Pro"), "Listen-s-MacBook-Pro");
+        assert_eq!(
+            sanitize_group_name("Listen's MacBook Pro"),
+            "Listen-s-MacBook-Pro"
+        );
         assert_eq!(sanitize_group_name("..."), "");
     }
 

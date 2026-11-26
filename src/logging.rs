@@ -22,6 +22,8 @@ const MAX_TUI_LOG_BYTES: usize = 512 * 1024;
 const TUI_TRUNCATION_MARKER: &str = "… [truncated]";
 static TUI_LOG_WRITER: OnceLock<TuiLogWriter> = OnceLock::new();
 thread_local! {
+    // Clippy also checks the Windows expansion of this already-const initializer.
+    #[allow(clippy::missing_const_for_thread_local)]
     static IN_FILE_LOG_WRITE: Cell<bool> = const { Cell::new(false) };
 }
 

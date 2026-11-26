@@ -69,12 +69,11 @@ pub(crate) async fn launch_for_tui(
     alias: &str,
     model: Option<&str>,
     reasoning: ReasoningLaunch,
-    extra_args: Vec<String>,
     shutdown: &mut ShutdownListener,
 ) -> Result<TuiLaunchOutcome> {
     launch_interactive(
         Some(alias),
-        extra_args,
+        Vec::new(),
         false,
         false,
         model,
@@ -226,6 +225,7 @@ async fn launch_interactive(
     // SIGINT or SIGTERM anywhere from here to the restore is recorded rather than
     // discarded. See `wait_for_codex_to_read_auth`.
     let mut owned_shutdown;
+    let remember_target = tui_shutdown.is_some();
     let interrupt = match tui_shutdown {
         Some(shutdown) => shutdown,
         None => {
@@ -304,6 +304,9 @@ async fn launch_interactive(
             return Err(spawn_err).context("Failed to start codex");
         }
     };
+    if remember_target {
+        crate::desktop::LaunchTarget::Cli.remember(&target_alias, false);
+    }
     let pipes = take_codex_pipes(&mut child, json);
 
     // Give codex time to read auth.json, then restore immediately.
@@ -859,6 +862,7 @@ async fn launch_provider(
     shutdown: Option<&mut ShutdownListener>,
 ) -> Result<TuiLaunchOutcome> {
     let mut owned_shutdown;
+    let remember_target = shutdown.is_some();
     let shutdown = match shutdown {
         Some(shutdown) => shutdown,
         None => {
@@ -1056,6 +1060,9 @@ async fn launch_provider(
             return Err(err).context("Failed to start Codex");
         }
     };
+    if remember_target {
+        crate::desktop::LaunchTarget::Cli.remember(&profile.alias, true);
+    }
     // The child owns its rollout now; record its pid so a crashed launcher's
     // next resume attempt can refuse to double a still-running Codex.
     if let Some(session) = native_session.as_mut() {
@@ -1766,8 +1773,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn terminating_a_launch_reaps_the_child_before_returning() {
-        let mut child = std::process::Command::new("sh")
-            .args(["-c", "sleep 30"])
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
             .spawn()
             .expect("spawn child");
 

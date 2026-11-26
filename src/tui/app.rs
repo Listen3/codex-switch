@@ -864,7 +864,11 @@ impl App {
             let reload = self.sync_page.finish(result, self.language);
             if reload {
                 if let Some(group) = self.account_group.clone()
-                    && !self.sync_page.group_names().iter().any(|name| name == &group)
+                    && !self
+                        .sync_page
+                        .group_names()
+                        .iter()
+                        .any(|name| name == &group)
                 {
                     self.account_group = None;
                 }
@@ -914,11 +918,10 @@ impl App {
             super::sync_page::SyncCommand::PullGroups { groups } => {
                 self.sync_page.begin();
                 tokio::spawn(async move {
-                    let result =
-                        crate::sync_store::pull_groups(&settings, language, &groups)
-                            .await
-                            .map(super::sync_page::SyncReport::Changed)
-                            .map_err(|error| error.to_string());
+                    let result = crate::sync_store::pull_groups(&settings, language, &groups)
+                        .await
+                        .map(super::sync_page::SyncReport::Changed)
+                        .map_err(|error| error.to_string());
                     let _ = tx.send(result).await;
                 });
             }
@@ -933,11 +936,11 @@ impl App {
         }
         self.active_tab = tab;
         self.status_msg = None;
-            if self.active_tab == Tab::Settings && !self.settings.is_dirty() {
-                let cfg = crate::config::load_current().unwrap_or_else(|_| crate::config::get());
-                self.language = cfg.language;
-                self.settings = super::settings::SettingsState::from_config(cfg);
-            }
+        if self.active_tab == Tab::Settings && !self.settings.is_dirty() {
+            let cfg = crate::config::load_current().unwrap_or_else(|_| crate::config::get());
+            self.language = cfg.language;
+            self.settings = super::settings::SettingsState::from_config(cfg);
+        }
     }
 
     /// Handle a mouse event against the last frame's hit map.
@@ -1159,9 +1162,9 @@ impl App {
                 }
                 None
             }
-            OverlayClick::LaunchArgs => {
+            OverlayClick::LaunchTarget => {
                 if let Some(picker) = self.provider_launch.as_mut() {
-                    picker.click_args();
+                    picker.toggle_target();
                 }
                 None
             }
@@ -1375,7 +1378,7 @@ impl App {
         String,
         String,
         crate::provider::ReasoningLaunch,
-        Vec<String>,
+        crate::desktop::LaunchTarget,
     )> {
         let picker = self.provider_launch.as_mut()?;
         match picker.handle_key(code) {
@@ -1388,10 +1391,10 @@ impl App {
                 alias,
                 model,
                 reasoning,
-                extra_args,
+                target,
             } => {
                 self.provider_launch = None;
-                Some((alias, model, reasoning, extra_args))
+                Some((alias, model, reasoning, target))
             }
         }
     }
@@ -3110,18 +3113,24 @@ impl App {
             if self.is_warmup_in_flight(&entry.alias) {
                 continue;
             }
-            let five = due_reset(usage.primary.as_ref().and_then(|window| window.resets_at), now)
-                .filter(|ts| {
-                    !self
-                        .auto_warmed_windows
-                        .contains(&warmup_window_key(&entry.alias, "5h", *ts))
-                });
-            let seven = due_reset(usage.secondary.as_ref().and_then(|window| window.resets_at), now)
-                .filter(|ts| {
-                    !self
-                        .auto_warmed_windows
-                        .contains(&warmup_window_key(&entry.alias, "7d", *ts))
-                });
+            let five = due_reset(
+                usage.primary.as_ref().and_then(|window| window.resets_at),
+                now,
+            )
+            .filter(|ts| {
+                !self
+                    .auto_warmed_windows
+                    .contains(&warmup_window_key(&entry.alias, "5h", *ts))
+            });
+            let seven = due_reset(
+                usage.secondary.as_ref().and_then(|window| window.resets_at),
+                now,
+            )
+            .filter(|ts| {
+                !self
+                    .auto_warmed_windows
+                    .contains(&warmup_window_key(&entry.alias, "7d", *ts))
+            });
             if five.is_none() && seven.is_none() {
                 continue;
             }
@@ -3296,7 +3305,7 @@ async fn run_app(
                         continue;
                     }
                     if app.provider_launch.is_some() {
-                        if let Some((alias, model, reasoning, extra_args)) =
+                        if let Some((alias, model, reasoning, target)) =
                             app.handle_provider_launch_key(key.code)
                         {
                             if app.defer_while_switching("launching Codex") {
@@ -3308,7 +3317,7 @@ async fn run_app(
                                 alias,
                                 (!model.is_empty()).then_some(model),
                                 reasoning,
-                                extra_args,
+                                target,
                                 shutdown,
                             )
                             .await
@@ -3390,7 +3399,7 @@ async fn run_app(
                             continue;
                         }
                         if app.provider_launch.is_some() {
-                            if let Some((alias, model, reasoning, extra_args)) =
+                            if let Some((alias, model, reasoning, target)) =
                                 app.handle_provider_launch_key(code)
                             {
                                 if app.defer_while_switching("launching Codex") {
@@ -3402,7 +3411,7 @@ async fn run_app(
                                     alias,
                                     (!model.is_empty()).then_some(model),
                                     reasoning,
-                                    extra_args,
+                                    target,
                                     shutdown,
                                 )
                                 .await
@@ -3523,7 +3532,7 @@ async fn dispatch_main_key(
                         alias,
                         None,
                         crate::provider::ReasoningLaunch::Saved,
-                        Vec::new(),
+                        crate::desktop::LaunchTarget::Cli,
                         shutdown,
                     )
                     .await
@@ -3713,9 +3722,22 @@ async fn perform_launch(
     alias: String,
     model: Option<String>,
     reasoning: crate::provider::ReasoningLaunch,
-    extra_args: Vec<String>,
+    target: crate::desktop::LaunchTarget,
     shutdown: &mut crate::signals::ShutdownListener,
 ) -> Option<crate::signals::ShutdownSignal> {
+    if target == crate::desktop::LaunchTarget::Desktop {
+        let result = crate::desktop::launch(&alias, model.as_deref(), reasoning);
+        match result {
+            Ok(crate::desktop::LaunchOutcome::Started) => {
+                app.set_status(format!("Started Codex Desktop ({alias})"), 4);
+            }
+            Ok(crate::desktop::LaunchOutcome::Activated) => {
+                app.set_status(format!("Activated Codex Desktop ({alias})"), 4);
+            }
+            Err(error) => app.set_status_error(format!("Desktop launch failed: {error:#}"), 6),
+        }
+        return None;
+    }
     suspend_tui_for_plain_output();
     crate::output::set_message_mode(crate::output::MessageMode::Stdout);
 
@@ -3724,9 +3746,7 @@ async fn perform_launch(
         None => println!("\n=== Launch Codex: {alias} ===\n"),
     }
 
-    let result =
-        crate::launch::launch_for_tui(&alias, model.as_deref(), reasoning, extra_args, shutdown)
-            .await;
+    let result = crate::launch::launch_for_tui(&alias, model.as_deref(), reasoning, shutdown).await;
 
     let _ = std::io::Write::flush(&mut std::io::stdout());
 
@@ -4493,7 +4513,13 @@ mod tests {
         ));
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
 
-        for expected in [Tab::Accounts, Tab::Sync, Tab::Providers, Tab::Settings, Tab::Logs] {
+        for expected in [
+            Tab::Accounts,
+            Tab::Sync,
+            Tab::Providers,
+            Tab::Settings,
+            Tab::Logs,
+        ] {
             terminal
                 .draw(|frame| crate::tui::ui::render(frame, &mut app))
                 .unwrap();
@@ -4560,8 +4586,9 @@ mod tests {
             .hitmap
             .settings_body
             .expect("rendered settings body hit region");
+        let previous_focus = app.settings.focused_index();
         app.handle_mouse(scroll(MouseEventKind::ScrollDown, body.x + 1, body.y + 1));
-        assert_eq!(app.settings.focused_index(), 1);
+        assert_eq!(app.settings.focused_index(), previous_focus + 1);
 
         app.handle_settings_key(KeyCode::Enter);
         assert!(app.settings.is_editing());
@@ -5046,6 +5073,30 @@ mod tests {
     }
 
     #[test]
+    fn launch_target_is_local_to_the_profile_and_cancel_does_not_save() {
+        use crate::desktop::LaunchTarget;
+        use crate::tui::provider_launch::{LaunchPickerOutcome, ProviderLaunchState};
+        let _home = EnvHome::new();
+        for alias in ["first", "second"] {
+            std::fs::create_dir_all(crate::auth::profiles_dir().unwrap().join(alias)).unwrap();
+        }
+        LaunchTarget::Cli.remember("first", false);
+        let mut picker = ProviderLaunchState::from_chatgpt("first", &[]);
+        assert!(matches!(
+            picker.handle_key(KeyCode::Enter),
+            LaunchPickerOutcome::Launch {
+                target: LaunchTarget::Cli,
+                ..
+            }
+        ));
+        picker.handle_key(KeyCode::Tab);
+        picker.handle_key(KeyCode::Esc);
+        assert_eq!(LaunchTarget::load("first", false), LaunchTarget::Cli);
+        assert_eq!(LaunchTarget::load("second", false), LaunchTarget::Desktop);
+        assert_eq!(LaunchTarget::load("first", true), LaunchTarget::Desktop);
+    }
+
+    #[test]
     fn provider_form_add_saves_a_provider() {
         let _home = EnvHome::new();
         let mut app = App::new();
@@ -5092,7 +5143,7 @@ mod tests {
         app.handle_provider_list_key(KeyCode::Char('o'));
         assert!(app.provider_launch.is_some());
         assert!(app.handle_provider_launch_key(KeyCode::Down).is_none());
-        let (alias, model, reasoning, extra_args) = app
+        let (alias, model, reasoning, target) = app
             .handle_provider_launch_key(KeyCode::Enter)
             .expect("enter launches");
         assert_eq!(alias, "or");
@@ -5101,7 +5152,7 @@ mod tests {
             reasoning,
             crate::provider::ReasoningLaunch::Effort("high".into())
         );
-        assert!(extra_args.is_empty());
+        assert_eq!(target, crate::desktop::LaunchTarget::Desktop);
         assert!(app.provider_launch.is_none());
         assert_eq!(
             app.providers[0].models[1].reasoning.as_deref(),
@@ -5286,13 +5337,13 @@ mod tests {
         assert!(app.handle_accounts_key(KeyCode::Char('o')).is_none());
         assert!(app.provider_launch.is_some());
 
-        let (alias, model, reasoning, extra_args) = app
+        let (alias, model, reasoning, target) = app
             .handle_provider_launch_key(KeyCode::Enter)
             .expect("default row should launch");
         assert_eq!(alias, "work");
         assert!(model.is_empty());
         assert_eq!(reasoning, crate::provider::ReasoningLaunch::Skip);
-        assert!(extra_args.is_empty());
+        assert_eq!(target, crate::desktop::LaunchTarget::Desktop);
 
         app.handle_accounts_key(KeyCode::Char('o'));
         app.handle_provider_launch_key(KeyCode::Down);

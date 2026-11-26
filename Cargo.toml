@@ -1,6 +1,6 @@
 [package]
 name = "codex-switch"
-version = "20261114.1.0"
+version = "20261126.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Codex account switcher — multi-profile manager with usage dashboard"
@@ -63,9 +63,10 @@ chrono = { version = "0.4", features = ["clock"] }
 supports-color = "3"
 owo-colors = "4"
 tar = "0.4"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 libc = "0.2"
 rpassword = "7"
+sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = [

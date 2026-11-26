@@ -834,7 +834,7 @@ fn release_retests_legacy_upgrades_on_all_supported_hosts() {
         "needs: [meta, build, attest]",
         "if: needs.meta.outputs.is_dev == 'true' || needs.meta.outputs.prerelease == 'false'",
         "os: [ubuntu-latest, macos-26, windows-latest]",
-        r#"legacy: ["0.0.19", "20260804.1.0"]"#,
+        r#"fromJSON(github.repository_owner == 'xjoker' && '["0.0.19", "20260804.1.0"]' || '["0.0.19", "20261114.1.0"]')"#,
         "Download build artifacts",
         r#"bash scripts/ci/legacy-upgrade.sh "${{ matrix.legacy }}""#,
         r#"./scripts/ci/legacy-upgrade.ps1 -Legacy "${{ matrix.legacy }}""#,
@@ -844,7 +844,7 @@ fn release_retests_legacy_upgrades_on_all_supported_hosts() {
             "legacy-upgrade job must contain `{required}`"
         );
     }
-    // Reviewed archive fixtures for both legacy updaters.
+    // Reviewed archive fixtures for the upstream and fork updaters.
     for hash in [
         "3589fdac3d480aea83ab61dd4fb0a7592c018a44415842083df2d5f1d0bb0d2f",
         "5db981cc5f1380f3bf9ac2d66484c0cc67d06712e617c2cd0457e3058dcb12b0",
@@ -854,17 +854,23 @@ fn release_retests_legacy_upgrades_on_all_supported_hosts() {
         "f1b1fd3eb3843d5e1b9eb578d5296eb6938b828c0a34d1aa7b996d0abb6cdbac",
         "459c01026ccd46660408c36944b2001ba0337248fdae2c094515410a587ac986",
         "b89e3d82a300795feaba9aa8e51d1675877f0072bfc44fb4a70a9d05f261bd41",
+        "309082e0f8840012327d31bf99adaec4f8ecc18231d7140ded9205fe4292ebb4",
+        "02defa1c5b4b2a8991d9a8a3ffdf410986747dcd234745ca55551624bac0a42d",
+        "40a351320116da329eb9de82d9b93091c0a44fa8cea48728eff72c17be894ff7",
+        "4e89deae5ffb48621afb84551a7b6573f70c5c43851e305fcb0fea310c0f51c9",
     ] {
         assert!(unix.contains(hash), "Unix gate must pin `{hash}`");
     }
     for hash in [
         "9ff8a3f8794517771ef6959632417fdf1dfbc85b7fdf4c344998223985582e63",
         "2702116e852f8bf3563a0dc892ab6bab2792679c090054d184d65f43b9224e4b",
+        "a9adf7216e4245f94d2afbc635044710eefc5ade16fbe8431b0a1b1f63c4eb98",
     ] {
         assert!(windows.contains(hash), "Windows gate must pin `{hash}`");
     }
     for script in [&unix, &windows] {
         for required in [
+            "Listen3/codex-switch",
             "releases/download/v",
             "self-update",
             "--dev",

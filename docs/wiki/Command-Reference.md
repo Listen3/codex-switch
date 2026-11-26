@@ -108,7 +108,7 @@ Mouse input is available alongside the keyboard: click a tab to switch pages, cl
 | `s` | Cycle sort order (name / quota / status) |
 | `Space` | Mark or unmark an account |
 | `u` (Accounts page when no accounts are marked, or account menu) | Switch to the selected account; the status line shows `Switching to …` while it is in progress |
-| `o` | Open the selected account's launch picker (also `o` in the account menu): use Codex's default, or choose a cached model, one-shot reasoning, and extra Codex arguments |
+| `o` | Open the selected account's launch picker (also `o` in the account menu): use Codex's default, or choose a cached model, one-shot reasoning, and Desktop or CLI (Tab) |
 | `c` (account menu) | Confirm and consume the earliest-expiring reset card |
 | `r` (account menu) | Refresh usage and the account's authenticated model catalog |
 | `w` (account menu) | Warm up the selected account |
@@ -134,7 +134,7 @@ Usage and refresh diagnostics record request phase start and completion, includi
 |---|---|
 | `j` / `k` or `↑` / `↓` | Navigate |
 | `a` | Add a provider (form dialog) |
-| `Enter` / `o` | Launch Codex: pick a saved model, reasoning, and optional extra argv |
+| `Enter` / `o` | Launch Codex: pick a saved model, reasoning, and Desktop or CLI (Tab) |
 | `e` | Edit the selected provider |
 | `n` | Rename the selected provider |
 | `d` | Remove the selected provider (confirmation required) |
@@ -142,7 +142,7 @@ Usage and refresh diagnostics record request phase start and completion, includi
 | `h` | Show help (main view) |
 | `q` | Quit (main view) |
 
-The Providers table never renders the stored key. `Enter` or `o` picks a saved model (and optionally changes reasoning or extra Codex argv for this session) then launches, or run `codex-switch launch <alias>` from the shell. `e` opens the edit form (including env key, wire API, and extra `-c`). `l` is re-login on the Accounts tab, not launch.
+The Providers table never renders the stored key. `Enter` or `o` picks a saved model (and optionally changes reasoning or switches Desktop/CLI with Tab) then launches, or run `codex-switch launch <alias>` from the shell. `e` opens the edit form (including env key, wire API, and extra `-c`). `l` is re-login on the Accounts tab, not launch.
 
 ### Settings tab
 

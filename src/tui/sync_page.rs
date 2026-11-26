@@ -230,7 +230,10 @@ impl SyncPage {
     }
 
     fn move_focus(&mut self, delta: isize) {
-        let index = ORDER.iter().position(|item| *item == self.focus).unwrap_or(0);
+        let index = ORDER
+            .iter()
+            .position(|item| *item == self.focus)
+            .unwrap_or(0);
         let len = ORDER.len() as isize;
         let next = (index as isize + delta).rem_euclid(len) as usize;
         self.focus = ORDER[next];
@@ -331,7 +334,10 @@ pub fn render(frame: &mut Frame, page: &SyncPage, area: Rect, language: Language
     let rows = [
         (Focus::Group, format!("{}    {group}", text.sync_group)),
         (Focus::Url, format!("{}  {url}", text.sync_url)),
-        (Focus::Password, format!("{}      {password}", text.sync_password)),
+        (
+            Focus::Password,
+            format!("{}      {password}", text.sync_password),
+        ),
         (Focus::Pull, text.sync_pull.to_string()),
         (Focus::Push, text.sync_push.to_string()),
     ];
@@ -356,7 +362,10 @@ pub fn render(frame: &mut Frame, page: &SyncPage, area: Rect, language: Language
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(text.sync_help, base().fg(C_GRAY))));
     if page.busy {
-        lines.push(Line::from(Span::styled(text.sync_busy, base().fg(C_YELLOW))));
+        lines.push(Line::from(Span::styled(
+            text.sync_busy,
+            base().fg(C_YELLOW),
+        )));
     }
     if let Some(notice) = &page.notice {
         lines.push(Line::from(Span::styled(notice.clone(), base().fg(C_CYAN))));
@@ -365,7 +374,9 @@ pub fn render(frame: &mut Frame, page: &SyncPage, area: Rect, language: Language
         lines.push(Line::from(Span::styled(error.clone(), base().fg(C_RED))));
     }
     frame.render_widget(
-        Paragraph::new(lines).style(base()).wrap(Wrap { trim: false }),
+        Paragraph::new(lines)
+            .style(base())
+            .wrap(Wrap { trim: false }),
         inner,
     );
     if let Some(picker) = &page.picker {
@@ -390,8 +401,8 @@ fn render_picker(frame: &mut Frame, picker: &GroupPicker, area: Rect, language: 
         .borders(Borders::ALL)
         .border_style(base().fg(C_YELLOW))
         .style(base());
-    let height = area.height.min(14).max(5);
-    let width = area.width.min(72).max(20);
+    let height = area.height.clamp(5, 14);
+    let width = area.width.clamp(20, 72);
     let popup = Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y,
@@ -402,15 +413,18 @@ fn render_picker(frame: &mut Frame, picker: &GroupPicker, area: Rect, language: 
     frame.render_widget(ratatui::widgets::Clear, popup);
     frame.render_widget(block, popup);
     let visible = usize::from(inner.height.saturating_sub(2)).max(1);
-    let scroll = if picker.cursor + 1 > visible {
-        picker.cursor + 1 - visible
-    } else {
-        0
-    };
-    let mut lines = vec![Line::from(Span::styled(help, base().fg(C_GRAY))), Line::from("")];
+    let scroll = (picker.cursor + 1).saturating_sub(visible);
+    let mut lines = vec![
+        Line::from(Span::styled(help, base().fg(C_GRAY))),
+        Line::from(""),
+    ];
     for (index, name) in picker.groups.iter().enumerate().skip(scroll).take(visible) {
         let mark = if picker.checked[index] { "[x]" } else { "[ ]" };
-        let style = if index == picker.cursor { highlight() } else { base() };
+        let style = if index == picker.cursor {
+            highlight()
+        } else {
+            base()
+        };
         lines.push(Line::from(Span::styled(format!("{mark} {name}"), style)));
     }
     frame.render_widget(Paragraph::new(lines).style(base()), inner);
@@ -427,7 +441,12 @@ fn selected_groups(picker: &GroupPicker) -> Vec<String> {
     if !checked.is_empty() {
         return checked;
     }
-    picker.groups.get(picker.cursor).cloned().into_iter().collect()
+    picker
+        .groups
+        .get(picker.cursor)
+        .cloned()
+        .into_iter()
+        .collect()
 }
 
 fn char_to_byte(text: &str, char_index: usize) -> usize {

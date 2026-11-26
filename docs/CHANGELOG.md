@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## v20261126.1.0 ? 2026-11-26
+
+- The TUI launch picker switches between Desktop and CLI with Tab and remembers the most recent choice for each account or provider.
+- Each account or provider has one desktop instance with an independent Codex home. Launching it again brings the existing window forward without rewriting its settings or credentials. Matching token rotations are recovered into the saved account when codex-switch next checks it.
+- Redis sync encrypts group snapshots and preserves accounts when aliases conflict. The TUI supports switching account groups directly.
+- Updated ZIP extraction and network dependencies to address RustSec advisories.
 
 ## v20261114.1.0 — 2026-11-14
 
