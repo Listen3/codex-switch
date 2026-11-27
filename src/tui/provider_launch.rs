@@ -326,6 +326,16 @@ pub fn render_provider_launch(
     hits.push(Some(OverlayClick::LaunchTarget));
     lines.push(Line::from(Span::styled(hint, dim())));
     hits.push(None);
+    if state.kind == LaunchKind::Account && state.target == LaunchTarget::Desktop {
+        let note = match crate::config::get().language {
+            crate::config::Language::En => {
+                "Desktop windows share local chats and keep separate logins."
+            }
+            crate::config::Language::Zh => "桌面窗口共用本地会话，各自登录。",
+        };
+        lines.push(Line::from(Span::styled(note, dim())));
+        hits.push(None);
+    }
     lines.push(Line::from(""));
     hits.push(None);
 
@@ -469,6 +479,7 @@ mod tests {
     #[test]
     fn account_catalog_error_is_visible_and_alias_guard_preserves_provider_picker() {
         let mut account = ProviderLaunchState::from_chatgpt("work", &[]);
+        account.target = crate::desktop::LaunchTarget::Desktop;
         account.update_chatgpt_catalog("other", None, Some("wrong account".into()));
         assert!(account.catalog_status.is_none());
         account.update_chatgpt_catalog(
@@ -494,6 +505,7 @@ mod tests {
             .join("\n");
         assert!(joined.contains("Loading model catalog"));
         assert!(joined.contains("(Codex default)"));
+        assert!(joined.contains("share local chats") || joined.contains("共用本地会话"));
 
         account.update_chatgpt_catalog(
             "work",

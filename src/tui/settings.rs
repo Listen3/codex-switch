@@ -24,7 +24,6 @@ enum Focus {
     TeamPriority,
     RestartAppServer,
     RestoreDelay,
-    ShareDesktopSessions,
     AutoWarmup,
 }
 
@@ -39,7 +38,6 @@ const FOCUS_ORDER: &[Focus] = &[
     Focus::TeamPriority,
     Focus::RestartAppServer,
     Focus::RestoreDelay,
-    Focus::ShareDesktopSessions,
     Focus::AutoWarmup,
 ];
 
@@ -225,11 +223,6 @@ impl SettingsState {
                 self.draft.use_cfg.restart_app_server = !self.draft.use_cfg.restart_app_server;
                 self.dirty = true;
             }
-            Focus::ShareDesktopSessions => {
-                self.draft.launch.share_desktop_sessions =
-                    !self.draft.launch.share_desktop_sessions;
-                self.dirty = true;
-            }
             Focus::AutoWarmup => {
                 self.draft.warmup.auto = !self.draft.warmup.auto;
                 self.dirty = true;
@@ -258,7 +251,6 @@ impl SettingsState {
                 self.draft.use_cfg.restart_app_server = !self.draft.use_cfg.restart_app_server;
                 self.dirty = true;
             }
-            Focus::ShareDesktopSessions => self.activate(),
             Focus::AutoWarmup => {
                 self.draft.warmup.auto = !self.draft.warmup.auto;
                 self.dirty = true;
@@ -276,11 +268,7 @@ impl SettingsState {
             Focus::TuiRefresh => self.draft.tui.auto_refresh_interval_secs.to_string(),
             Focus::SafetyMargin => format_num(self.draft.use_cfg.safety_margin_7d),
             Focus::RestoreDelay => self.draft.launch.restore_delay_secs.to_string(),
-            Focus::TeamPriority
-            | Focus::RestartAppServer
-            | Focus::Language
-            | Focus::ShareDesktopSessions
-            | Focus::AutoWarmup => {
+            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {
                 return;
             }
         };
@@ -313,11 +301,8 @@ impl SettingsState {
                 self.draft.launch.restore_delay_secs =
                     parse_u64(&raw, 1, "launch.restore_delay_secs")?;
             }
-            Focus::TeamPriority
-            | Focus::RestartAppServer
-            | Focus::Language
-            | Focus::ShareDesktopSessions
-            | Focus::AutoWarmup => {}
+            Focus::TeamPriority | Focus::RestartAppServer | Focus::Language | Focus::AutoWarmup => {
+            }
         }
         self.dirty = true;
         Ok(())
@@ -438,7 +423,6 @@ fn field_hint(focus: Focus, language: crate::config::Language) -> &'static str {
         Focus::TeamPriority => text.hint_team_priority,
         Focus::RestartAppServer => text.hint_restart_app_server,
         Focus::RestoreDelay => text.hint_restore_delay,
-        Focus::ShareDesktopSessions => text.hint_share_desktop_sessions,
         Focus::AutoWarmup => text.hint_auto_warmup,
     }
 }
@@ -652,19 +636,6 @@ pub fn render_settings_tab(
         &mut line_focus,
         &mut focused_line,
     );
-    push_field(
-        settings,
-        Focus::ShareDesktopSessions,
-        text.share_desktop_sessions,
-        bool_label(
-            settings.draft.launch.share_desktop_sessions,
-            settings.draft.language,
-        )
-        .to_string(),
-        &mut lines,
-        &mut line_focus,
-        &mut focused_line,
-    );
     lines.push(Line::from(""));
     line_focus.push(None);
     lines.push(Line::from(Span::styled(
@@ -772,10 +743,9 @@ mod tests {
         } = use_cfg;
         let crate::config::LaunchConfig {
             restore_delay_secs: _,
-            share_desktop_sessions: _,
         } = launch;
         let crate::config::WarmupConfig { auto: _ } = warmup;
-        assert_eq!(FOCUS_ORDER.len(), 12);
+        assert_eq!(FOCUS_ORDER.len(), 11);
     }
 
     fn type_value(settings: &mut SettingsState, value: &str) {
@@ -826,8 +796,6 @@ mod tests {
         settings.handle_key(KeyCode::Enter);
         move_to(&mut settings, Focus::RestoreDelay);
         type_value(&mut settings, "5");
-        move_to(&mut settings, Focus::ShareDesktopSessions);
-        settings.handle_key(KeyCode::Enter);
         assert!(settings.is_dirty());
 
         match settings.try_save() {
@@ -848,7 +816,6 @@ mod tests {
         assert_eq!(loaded.use_cfg.safety_margin_7d, 15.0);
         assert!(!loaded.use_cfg.team_priority);
         assert_eq!(loaded.launch.restore_delay_secs, 5);
-        assert!(loaded.launch.share_desktop_sessions);
         unsafe {
             match prev_cs {
                 Some(v) => std::env::set_var("CODEX_SWITCH_HOME", v),

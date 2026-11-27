@@ -101,11 +101,10 @@ pub(crate) fn launch(
     }
 
     let data = windows.join("desktop-window-1");
-    let share_sessions = !is_provider && crate::config::get().launch.share_desktop_sessions;
-    let home = data.join(if share_sessions {
-        shared::HOME
-    } else {
+    let home = data.join(if is_provider {
         "codex-home"
+    } else {
+        shared::HOME
     });
     let mut command = desktop_command(&executable, &data, &home);
     let config_path = home.join("config.toml");
@@ -114,7 +113,7 @@ pub(crate) fn launch(
     let needs_settings = !inherited.is_file();
     let inherited_workspace = home.join(workspace::INHERITED);
     let needs_workspace = !is_provider && !inherited_workspace.is_file();
-    let source = if needs_settings || needs_workspace || share_sessions {
+    let source = if needs_settings || !is_provider {
         let mut source = std::path::absolute(auth::user_codex_home()?)?;
         if source.starts_with(std::path::absolute(auth::app_home()?)?) {
             source = dirs::home_dir()
@@ -158,23 +157,24 @@ pub(crate) fn launch(
         auth::ensure_file_credentials_store()?;
         let saved = auth::read_auth(&account_auth)?;
         auth::validate_managed_auth_value(&saved)?;
-        if let Some(source) = source.as_deref() {
-            if share_sessions {
-                let sqlite_home = shared::connect(source, &home)?;
-                config.insert(
-                    "sqlite_home".into(),
-                    sqlite_home.to_string_lossy().as_ref().into(),
-                );
-                config.insert(
-                    "log_dir".into(),
-                    home.join("log").to_string_lossy().as_ref().into(),
-                );
-                if needs_workspace {
-                    workspace::inherit_shared_layout(source, &home, &sqlite_home, &saved)?;
-                }
-            } else if needs_workspace {
-                workspace::inherit(source, &home, &executable, &saved)?;
-            }
+        let source = source.as_deref().context("finding the common Codex home")?;
+        let sqlite_home = shared::connect(source, &home)?;
+        config.insert(
+            "sqlite_home".into(),
+            sqlite_home
+                .to_str()
+                .context("encoding the common Codex database path")?
+                .into(),
+        );
+        config.insert(
+            "log_dir".into(),
+            home.join("log")
+                .to_str()
+                .context("encoding the desktop log directory")?
+                .into(),
+        );
+        if needs_workspace {
+            workspace::inherit_shared_layout(source, &home, &sqlite_home, &saved)?;
         }
         let window_auth = home.join("auth.json");
         if auth::read_auth(&window_auth).ok().as_ref() != Some(&saved) {
@@ -186,7 +186,7 @@ pub(crate) fn launch(
     }
 
     // The inherited client configuration can point to a shared runtime database.
-    if !share_sessions {
+    if is_provider {
         config.remove("sqlite_home");
     }
     auth::atomic_write_private(&config_path, toml::to_string(&config)?.as_bytes())?;
@@ -232,7 +232,13 @@ fn activate_window(executable: &Path, data: &Path) -> Result<()> {
     // The desktop app's single-instance lock forwards this invocation to the
     // running window for this particular user-data-dir. It restores and focuses
     // that window without applying another set of account or model settings.
-    let mut relay = desktop_command(executable, data, &data.join("codex-home"))
+    let shared_home = data.join(shared::HOME);
+    let home = if shared_home.join("config.toml").is_file() {
+        shared_home
+    } else {
+        data.join("codex-home")
+    };
+    let mut relay = desktop_command(executable, data, &home)
         .spawn()
         .context("activating the existing Codex Desktop window")?;
     let deadline = Instant::now() + Duration::from_secs(5);

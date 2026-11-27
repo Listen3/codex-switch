@@ -337,7 +337,17 @@ jobs:
           cat > dev_body.md << EOF
           Development build from \`${GITHUB_REF}\` at ${GITHUB_SHA}.
 
-          Desktop instances inherit local settings, portable projects and conversations, and pin order. Enable **Share Desktop sessions** in Settings to use the default Codex conversation library across account windows. Each account keeps its login and its previous conversation copy. Quit and relaunch account windows to switch libraries.
+          ## 更新说明
+
+          - ChatGPT 账号桌面窗口现在默认共用本地会话。启动使用所选账号，各窗口各自登录，默认 Codex 的登录保持原样。
+          - 已移除共享开关和启动时的会话复制。启动弹窗会提示共享行为。同一条会话被另一进程占用时，Codex 会给出提示。
+          - 旧窗口退出后，用 codex-switch 重新启动同一个账号即可接入共享库。旧会话副本保留在原实例目录，旧副本中新增的回复也留在那里。
+
+          ## What's changed
+
+          - ChatGPT account windows use the default Codex local conversation library and sign in with the account selected at launch.
+          - The sharing switch and conversation copying have been removed. The launch picker explains shared chats and separate logins.
+          - Quit and relaunch older account windows to use the shared library. Existing copies and any replies added to those copies stay in their original directories.
 
           **This is a pre-release build for testing.** Use \`codex-switch self-update --dev\` to install, or \`codex-switch self-update --stable\` to return to the latest stable release.
 

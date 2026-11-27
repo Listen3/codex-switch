@@ -1,5 +1,11 @@
 # Changelog
 
+## v20261127.2.0 — 2026-11-27
+
+- ChatGPT account windows now use the default Codex local conversation library. A new Desktop launch uses the selected account and leaves the default Codex login as it was.
+- Removed the sharing switch and conversation copying from Desktop launches. The launch picker explains that windows share local chats and keep separate logins.
+- Quit and relaunch older account windows to use the shared library. Previous conversation copies remain in their original directories. Codex reports when a conversation already has a writer.
+
 ## v20261127.1.0 — 2026-11-27
 
 - Desktop instances inherit the default Codex configuration, skills, rules, and completed onboarding. Windows instances initialize their own native sandbox when Codex requests it.

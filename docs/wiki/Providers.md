@@ -182,7 +182,7 @@ The stored key is never rendered in the table. `o` launches Codex on both tabs: 
 
 ## Storage and security
 
-Each account or provider initially selects Desktop and remembers its most recently launched target. Each account or provider uses one desktop instance with its own Codex home and app data. Launching it again activates the existing window. Model and reasoning selections take effect when starting a new instance. Set `CODEX_SWITCH_DESKTOP_PATH` to the desktop executable for a custom installation. To forward extra CLI arguments, use `codex-switch launch <alias> -- <args>`.
+Each account or provider initially selects Desktop and remembers its most recently launched target. A provider window uses its own app data and conversation library. ChatGPT account windows use the default Codex local conversation library and keep separate logins. Launching the same profile again activates its existing window. Model and reasoning selections take effect when starting a new instance. Set `CODEX_SWITCH_DESKTOP_PATH` to the desktop executable for a custom installation. To forward extra CLI arguments, use `codex-switch launch <alias> -- <args>`.
 
 If reading saved account or provider data fails, the TUI keeps the last loaded rows and displays a stale or incomplete-list warning until a successful reload. A damaged provider file retains its previously loaded row when available. Refresh actions that depend on a successful reload are skipped after a failure.
 

@@ -80,6 +80,8 @@ On Windows the private-write path reads a directory's protected ACL first and re
 
 In the TUI Accounts page or account menu, `o` opens the same launch picker used by providers. `(Codex default)` adds no model or reasoning override; cached account models can supply a one-shot model and reasoning effort. Tab switches between Desktop and CLI. Each account remembers its most recent launch target, initially Desktop.
 
+Desktop launches use the selected ChatGPT account and the default Codex local conversation library. Each window keeps its own login. Quit and relaunch older account windows to switch to the shared library. Their previous copies stay in the original instance directories.
+
 ```bash
 codex-switch launch work -- --model gpt-5.4
 codex-switch launch work -- exec --json "review this"
