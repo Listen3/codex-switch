@@ -78,13 +78,21 @@ pub(crate) fn launch(
     let is_provider = provider::exists(alias);
     let dir = std::path::absolute(account_dir(alias, is_provider)?)?;
     let account_auth = dir.join("auth.json");
-    let _transaction = profile::lock_auth_transaction()?;
     let windows = if is_provider {
         dir.join("desktop-home")
     } else {
         dir
     };
+    // Resolve the executable outside the auth transaction lock (may invoke
+    // PowerShell on Windows or PlistBuddy on macOS).
     let executable = desktop_executable()?;
+    let provider_env = if is_provider {
+        Some(provider::load(alias)?.launch_env())
+    } else {
+        None
+    };
+
+    let transaction = profile::lock_auth_transaction()?;
     let processes = desktop_processes(&executable)?;
     let running = running_window(&windows, &processes).or_else(|| {
         if is_provider {
@@ -94,10 +102,26 @@ pub(crate) fn launch(
         }
     });
     if let Some(data) = running {
-        activate_window(&executable, &data)?;
+        // Release auth/launch locks before waiting up to 5s on window activation.
+        drop(transaction);
+        let outcome = activate_window(
+            &executable,
+            &data,
+            provider_env,
+            alias,
+            is_provider,
+            account_auth,
+        )?;
         LaunchTarget::Desktop.remember(alias, is_provider);
-        tracing::info!(alias, "activated existing Codex Desktop window");
-        return Ok(LaunchOutcome::Activated);
+        match outcome {
+            LaunchOutcome::Activated => {
+                tracing::info!(alias, "activated existing Codex Desktop window");
+            }
+            LaunchOutcome::Started => {
+                tracing::info!(alias, "started Codex Desktop window after prior closed");
+            }
+        }
+        return Ok(outcome);
     }
 
     let data = windows.join("desktop-window-1");
@@ -146,8 +170,8 @@ pub(crate) fn launch(
                 .context("expected provider key=value")?;
             provider::insert_toml_override(
                 &mut config,
-                key,
-                provider::provider_override_value(raw),
+                key.trim(),
+                provider::provider_override_value(raw.trim()),
             )?;
         }
         let (key, value) = p.launch_env();
@@ -201,7 +225,19 @@ pub(crate) fn launch(
         stop_launcher(&mut child);
         return Err(error).context("tracking Codex Desktop");
     }
-    let account_alias = alias.to_owned();
+    drop(transaction);
+    spawn_exit_sync(child, alias.to_owned(), is_provider, account_auth);
+    LaunchTarget::Desktop.remember(alias, is_provider);
+    tracing::info!(alias, "started Codex Desktop window");
+    Ok(LaunchOutcome::Started)
+}
+
+fn spawn_exit_sync(
+    mut child: Child,
+    account_alias: String,
+    is_provider: bool,
+    account_auth: PathBuf,
+) {
     // The next codex-switch command can also collect rotations after the TUI exits.
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -209,9 +245,6 @@ pub(crate) fn launch(
             sync_account_profile(&account_alias, &account_auth);
         }
     });
-    LaunchTarget::Desktop.remember(alias, is_provider);
-    tracing::info!(alias, "started Codex Desktop window");
-    Ok(LaunchOutcome::Started)
 }
 
 fn desktop_command(executable: &Path, data: &Path, home: &Path) -> Command {
@@ -228,7 +261,14 @@ fn desktop_command(executable: &Path, data: &Path, home: &Path) -> Command {
     command
 }
 
-fn activate_window(executable: &Path, data: &Path) -> Result<()> {
+fn activate_window(
+    executable: &Path,
+    data: &Path,
+    extra_env: Option<(String, String)>,
+    alias: &str,
+    is_provider: bool,
+    account_auth: PathBuf,
+) -> Result<LaunchOutcome> {
     // The desktop app's single-instance lock forwards this invocation to the
     // running window for this particular user-data-dir. It restores and focuses
     // that window without applying another set of account or model settings.
@@ -238,16 +278,33 @@ fn activate_window(executable: &Path, data: &Path) -> Result<()> {
     } else {
         data.join("codex-home")
     };
-    let mut relay = desktop_command(executable, data, &home)
+    let mut command = desktop_command(executable, data, &home);
+    if let Some((key, value)) = extra_env {
+        command.env(key, value);
+    }
+    let mut relay = command
         .spawn()
         .context("activating the existing Codex Desktop window")?;
+    let relay_pid = relay.id();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = relay.try_wait()? {
             anyhow::ensure!(status.success(), "desktop activation exited with {status}");
-            return Ok(());
+            return Ok(LaunchOutcome::Activated);
         }
         if Instant::now() >= deadline {
+            let flag = user_data_arg(data);
+            if let Ok(processes) = desktop_processes(executable)
+                && !processes
+                    .iter()
+                    .any(|p| p.pid != relay_pid && same_path(&p.user_data_arg, &flag))
+            {
+                // The prior window closed during the handoff race, so this
+                // process became the live instance rather than a relay.
+                let _ = std::fs::write(data.join("launcher.pid"), relay_pid.to_string());
+                spawn_exit_sync(relay, alias.to_owned(), is_provider, account_auth);
+                return Ok(LaunchOutcome::Started);
+            }
             stop_launcher(&mut relay);
             anyhow::bail!("existing Codex Desktop did not accept the activation request");
         }
@@ -295,7 +352,7 @@ pub(crate) fn sync_account_profile(alias: &str, path: &Path) {
     }
 }
 
-fn sync_account_profile_locked(alias: &str, path: &Path) {
+pub(crate) fn sync_account_profile_locked(alias: &str, path: &Path) {
     let Some(parent) = path.parent() else {
         return;
     };
@@ -390,15 +447,27 @@ fn desktop_data_arg(args: &[OsString], image: &Path) -> Option<OsString> {
     #[cfg(target_os = "linux")]
     if let [command] = args {
         use std::os::unix::ffi::OsStringExt;
+        let bytes = command.as_encoded_bytes();
         // The Linux desktop sets its process title to image + the original
         // argument. This launcher passes one argument, whose path can contain spaces.
-        let arg = command
-            .as_encoded_bytes()
-            .strip_prefix(image.as_os_str().as_encoded_bytes())?
-            .strip_prefix(b" ")?;
-        return arg
-            .starts_with(USER_DATA_FLAG.as_bytes())
-            .then(|| OsString::from_vec(arg.to_vec()));
+        if let Some(arg) = bytes
+            .strip_prefix(image.as_os_str().as_encoded_bytes())
+            .and_then(|rest| rest.strip_prefix(b" "))
+            && arg.starts_with(USER_DATA_FLAG.as_bytes())
+        {
+            return Some(OsString::from_vec(arg.to_vec()));
+        }
+        // Fallback when a wrapper script prepended extra flags before --user-data-dir=.
+        let needle = b" --user-data-dir=";
+        if let Some(pos) = bytes.windows(needle.len()).position(|w| w == needle) {
+            let tail = &bytes[pos + 1..];
+            let end = tail
+                .windows(3)
+                .position(|w| w == b" --")
+                .unwrap_or(tail.len());
+            return Some(OsString::from_vec(tail[..end].to_vec()));
+        }
+        return None;
     }
     let _ = image;
     None
@@ -419,7 +488,10 @@ fn desktop_processes(launcher: &Path) -> Result<Vec<DesktopProcess>> {
     // The official Linux package's launcher execs ChatGPT beside the script.
     #[cfg(target_os = "linux")]
     let image = if image.file_name() == Some(OsStr::new("codex-launcher")) {
-        image.with_file_name("ChatGPT").canonicalize()?
+        image
+            .with_file_name("ChatGPT")
+            .canonicalize()
+            .unwrap_or(image)
     } else {
         image
     };
@@ -484,19 +556,53 @@ fn running_window(root: &Path, processes: &[DesktopProcess]) -> Option<PathBuf> 
         .map(|(_, data)| data)
 }
 
+/// Scan live non-helper processes by their `--user-data-dir=` flag without
+/// requiring `desktop_executable()` to resolve. Used by `ensure_window_closed`
+/// so custom `CODEX_SWITCH_DESKTOP_PATH` launches, Linux wrapper scripts, and
+/// upgraded Windows MSIX packages cannot bypass the open-window guard.
+fn desktop_processes_by_user_data() -> Vec<DesktopProcess> {
+    let mut system = System::new();
+    let refresh = ProcessRefreshKind::nothing()
+        .with_exe(UpdateKind::Always)
+        .with_cmd(UpdateKind::Always);
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, refresh);
+    system
+        .processes()
+        .iter()
+        .filter_map(|(&pid, process)| {
+            if matches!(
+                process.status(),
+                ProcessStatus::Dead | ProcessStatus::Zombie
+            ) {
+                return None;
+            }
+            let image = process.exe().unwrap_or_else(|| Path::new(""));
+            Some(DesktopProcess {
+                pid: pid.as_u32(),
+                user_data_arg: desktop_data_arg(process.cmd(), image)?,
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn ensure_window_closed(root: &Path, alias: &str) -> Result<()> {
-    if window_dirs(root).next().is_some()
-        && let Ok(executable) = desktop_executable()
-        && running_window(
-            &std::path::absolute(root)?,
-            &desktop_processes(&executable)?,
-        )
-        .is_some()
+    let abs_root = std::path::absolute(root)?;
+    if window_dirs(&abs_root).next().is_some()
+        && running_window(&abs_root, &desktop_processes_by_user_data()).is_some()
     {
         anyhow::bail!("close the Codex Desktop window for '{alias}' first");
     }
-    for data in window_dirs(root) {
-        shared::prepare_profile_move(&std::path::absolute(data.join(shared::HOME))?)?;
+    for data in window_dirs(&abs_root) {
+        shared::prepare_profile_move(&data.join(shared::HOME))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_profile_delete(root: &Path, alias: &str) -> Result<()> {
+    ensure_window_closed(root, alias)?;
+    let abs_root = std::path::absolute(root)?;
+    for data in window_dirs(&abs_root) {
+        shared::unlink_shared_dirs(&data.join(shared::HOME))?;
     }
     Ok(())
 }
@@ -518,13 +624,20 @@ fn running_window_for_same_account(
         let Ok(path) = profile::profile_auth_path(&other) else {
             continue;
         };
-        let Some(data) = path.parent().and_then(|dir| running_window(dir, processes)) else {
+        let Some(data) = path
+            .parent()
+            .and_then(|dir| std::path::absolute(dir).ok())
+            .and_then(|dir| running_window(&dir, processes))
+        else {
             continue;
         };
         if let Ok(value) = auth::read_auth(&path) {
             let identity = profile::extract_identity(&value);
             if identity.account_id.as_ref() == Some(&account_id)
-                && identity.email.as_ref() == Some(&email)
+                && identity
+                    .email
+                    .as_deref()
+                    .is_some_and(|other_email| other_email.eq_ignore_ascii_case(&email))
             {
                 return Some(data);
             }
@@ -581,7 +694,16 @@ if ($p) {
                 if identifier.status.success()
                     && String::from_utf8_lossy(&identifier.stdout).trim() == "com.openai.codex"
                 {
-                    let path = bundle.join("MacOS").join(name);
+                    let exe_name = Command::new("/usr/libexec/PlistBuddy")
+                        .args(["-c", "Print :CFBundleExecutable"])
+                        .arg(bundle.join("Info.plist"))
+                        .output()
+                        .ok()
+                        .filter(|out| out.status.success())
+                        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+                        .filter(|exe| !exe.is_empty())
+                        .unwrap_or_else(|| name.to_owned());
+                    let path = bundle.join("MacOS").join(exe_name);
                     if path.is_file() {
                         return Ok(path);
                     }
@@ -642,6 +764,10 @@ mod tests {
         let flag = user_data_arg(Path::new("/home/test/My Desktop/desktop-window-1"));
         command.push(" ");
         command.push(&flag);
-        assert_eq!(desktop_data_arg(&[command], image), Some(flag));
+        assert_eq!(desktop_data_arg(&[command], image), Some(flag.clone()));
+
+        let mut wrapped = OsString::from("/opt/ChatGPT App/ChatGPT --ozone-platform-hint=auto ");
+        wrapped.push(&flag);
+        assert_eq!(desktop_data_arg(&[wrapped], image), Some(flag));
     }
 }

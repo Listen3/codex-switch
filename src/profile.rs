@@ -304,6 +304,7 @@ fn switch_live_auth_locked_after_write(
     after_write: impl Fn(&Path) -> Result<()>,
 ) -> Result<()> {
     let stage = Instant::now();
+    crate::desktop::sync_account_profile_locked(alias, src);
     let val = read_auth(src)?;
     crate::auth::validate_managed_auth_value(&val)?;
     let dst = codex_auth_path()?;
@@ -1316,6 +1317,7 @@ pub fn stage_profile_auth(alias: &str) -> Result<()> {
     if !src.exists() {
         return Err(CsError::NotFound(alias.to_string()).into());
     }
+    crate::desktop::sync_account_profile_locked(alias, &src);
     let val = read_auth(&src)?;
     crate::auth::validate_managed_auth_value(&val)?;
     let dst = codex_auth_path()?;
@@ -1333,7 +1335,7 @@ pub fn cmd_delete(alias: &str) -> Result<()> {
     if read_current() == alias {
         return Err(CsError::ActiveProfileDelete(alias.to_string()).into());
     }
-    crate::desktop::ensure_window_closed(&dir, alias)?;
+    crate::desktop::prepare_profile_delete(&dir, alias)?;
     let deleted_dir = deleted_profiles_dir()?;
     ensure_private_dir(&deleted_dir)?;
     let timestamp = SystemTime::now()
@@ -3327,6 +3329,17 @@ mod tests {
         crate::auth::write_auth(&first.join("auth.json"), &stale).unwrap();
         crate::desktop::sync_account_profile(alias, &saved_path);
         assert_eq!(profile_refresh_token(alias), "new-rt");
+
+        // Switching to the profile via TUI (`switch_profile`) must also adopt a
+        // newer desktop rotation before writing live auth.json.
+        let mut rotated2 = crate::auth::read_auth(&saved_path).unwrap();
+        rotated2["last_refresh"] = serde_json::json!("2099-01-02T00:00:00Z");
+        rotated2["tokens"]["refresh_token"] = serde_json::json!("newest-rt");
+        crate::auth::write_auth(&second.join("auth.json"), &rotated2).unwrap();
+        super::switch_profile(alias).unwrap();
+        assert_eq!(profile_refresh_token(alias), "newest-rt");
+        let live = crate::auth::read_auth(&crate::auth::codex_auth_path().unwrap()).unwrap();
+        assert_eq!(super::refresh_token(&live), Some("newest-rt"));
     }
 
     #[test]

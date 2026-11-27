@@ -3726,7 +3726,16 @@ async fn perform_launch(
     shutdown: &mut crate::signals::ShutdownListener,
 ) -> Option<crate::signals::ShutdownSignal> {
     if target == crate::desktop::LaunchTarget::Desktop {
-        let result = crate::desktop::launch(&alias, model.as_deref(), reasoning);
+        app.set_status(format!("Launching Codex Desktop ({alias})..."), 10);
+        let _ = terminal.draw(|f| super::ui::render(f, app));
+        let launch_alias = alias.clone();
+        let launch_model = model.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::desktop::launch(&launch_alias, launch_model.as_deref(), reasoning)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("desktop launch task panicked: {error}"))
+        .and_then(|res| res);
         match result {
             Ok(crate::desktop::LaunchOutcome::Started) => {
                 app.set_status(format!("Started Codex Desktop ({alias})"), 4);

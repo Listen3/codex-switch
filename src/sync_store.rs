@@ -529,6 +529,7 @@ fn accounts_in_group(group: &str, default_group: &str) -> Result<Vec<AccountSnap
     let mut snapshots = Vec::new();
     for alias in aliases_in_group(group, default_group, &index)? {
         let path = crate::profile::profile_auth_path(&alias)?;
+        crate::desktop::sync_account_profile(&alias, &path);
         let auth = crate::auth::read_auth(&path)?;
         snapshots.push(AccountSnapshot { alias, auth });
     }

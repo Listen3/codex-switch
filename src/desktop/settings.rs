@@ -150,6 +150,7 @@ pub(super) fn settings_db(home: &Path, flags: OpenFlags) -> Result<Option<Connec
     }
     let db = Connection::open_with_flags(&path, flags)
         .with_context(|| format!("opening {}", path.display()))?;
+    db.execute("PRAGMA busy_timeout=5000")?;
     let supported = db
         .prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'settings'")?
         .next()?
@@ -171,8 +172,10 @@ fn inherit_onboarding(source: &Path, home: &Path) -> Result<()> {
             db.prepare("SELECT value FROM settings WHERE scope = 'atom' AND key = ?")?;
         for key in ONBOARDING {
             select.bind((1, key))?;
-            if select.next()? == State::Row {
-                let value = serde_json::from_str(&select.read::<String, _>(0)?)?;
+            if select.next()? == State::Row
+                && let Ok(raw) = select.read::<String, _>(0)
+                && let Ok(value) = serde_json::from_str(&raw)
+            {
                 atoms.insert(key.into(), value);
             }
             select.reset()?;

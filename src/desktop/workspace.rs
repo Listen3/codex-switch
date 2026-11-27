@@ -32,9 +32,10 @@ fn open_db(path: &Path, flags: OpenFlags) -> Result<Option<Connection>> {
     if !path.is_file() {
         return Ok(None);
     }
-    Connection::open_with_flags(path, flags)
-        .with_context(|| format!("opening {}", path.display()))
-        .map(Some)
+    let db = Connection::open_with_flags(path, flags)
+        .with_context(|| format!("opening {}", path.display()))?;
+    db.execute("PRAGMA busy_timeout=5000")?;
+    Ok(Some(db))
 }
 
 fn has_table(db: &Connection, name: &str) -> Result<bool> {
@@ -396,7 +397,11 @@ fn read_layout(db: &Connection) -> Result<Map<String, Value>> {
         .contains(&base)
             || WORKSPACE_ROOTS.contains(&base)
         {
-            state.insert(key, serde_json::from_str(&rows.read::<String, _>(1)?)?);
+            if let Ok(raw) = rows.read::<String, _>(1)
+                && let Ok(value) = serde_json::from_str(&raw)
+            {
+                state.insert(key, value);
+            }
         }
     }
     Ok(state)
@@ -511,16 +516,36 @@ fn has_complete_history<'a>(mut id: &'a str, candidates: &'a BTreeMap<String, Ro
     false
 }
 
+const MAX_ROLLOUT_HEADER_BYTES: usize = 256 * 1024;
+
 fn rollout_header(path: &Path) -> io::Result<Option<String>> {
     let file = File::open(path)?;
     if path.extension().is_some_and(|extension| extension == "zst") {
-        BufReader::new(zstd::Decoder::new(file)?)
-            .lines()
-            .next()
-            .transpose()
+        read_bounded_first_line(zstd::Decoder::new(file)?)
     } else {
-        BufReader::new(file).lines().next().transpose()
+        read_bounded_first_line(file)
     }
+}
+
+fn read_bounded_first_line(reader: impl io::Read) -> io::Result<Option<String>> {
+    let mut limited = BufReader::new(reader.take((MAX_ROLLOUT_HEADER_BYTES + 1) as u64));
+    let mut buf = Vec::new();
+    let read = limited.read_until(b'\n', &mut buf)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if buf.len() > MAX_ROLLOUT_HEADER_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "rollout header line exceeds size limit",
+        ));
+    }
+    while matches!(buf.last(), Some(b'\n' | b'\r')) {
+        buf.pop();
+    }
+    String::from_utf8(buf)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn rollout_id(path: &Path) -> Option<&str> {
@@ -734,5 +759,29 @@ mod tests {
             fallback[&scoped_key(WORKSPACE_ROOTS[0], Some(owner))],
             json!([source])
         );
+    }
+
+    #[test]
+    fn read_layout_tolerates_null_and_malformed_json_and_rollout_header_caps_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Connection::open(dir.path().join(".codex-global-state.sqlite")).unwrap();
+        db.execute("CREATE TABLE settings(scope TEXT, key TEXT, value TEXT)")
+            .unwrap();
+        db.execute(
+            "INSERT INTO settings VALUES \
+             ('global', 'pinned-thread-ids', NULL), \
+             ('global', 'project-order', '{not-json'), \
+             ('global', 'local-projects', '{\"p1\":{\"id\":\"p1\"}}')",
+        )
+        .unwrap();
+        let state = read_layout(&db).unwrap();
+        assert!(!state.contains_key(PINNED_THREADS));
+        assert!(!state.contains_key(PROJECT_ORDER));
+        assert!(state.contains_key(LOCAL_PROJECTS));
+
+        let huge_path = dir.path().join("huge.jsonl");
+        fs::write(&huge_path, vec![b'a'; MAX_ROLLOUT_HEADER_BYTES + 16]).unwrap();
+        let err = rollout_header(&huge_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }
